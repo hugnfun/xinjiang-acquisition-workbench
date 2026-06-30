@@ -28,4 +28,6 @@ data/
 __pycache__/
 *.pyc
 .venv/
+*.egg-info/
+.pytest_cache/
 src-tauri/target/
