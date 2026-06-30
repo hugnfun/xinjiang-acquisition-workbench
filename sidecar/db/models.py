@@ -1,0 +1,109 @@
+from datetime import datetime
+from sqlalchemy import String, Integer, Float, Boolean, Text, DateTime, ForeignKey, JSON
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+class Base(DeclarativeBase):
+    pass
+
+class Material(Base):
+    __tablename__ = "material"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    platform: Mapped[str] = mapped_column(String(32), default="xiaohongshu")
+    note_id: Mapped[str] = mapped_column(String(64), index=True)
+    url: Mapped[str] = mapped_column(Text)
+    title: Mapped[str] = mapped_column(Text)
+    author: Mapped[str] = mapped_column(String(128))
+    author_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content: Mapped[str] = mapped_column(Text, default="")
+    likes: Mapped[int] = mapped_column(Integer, default=0)
+    collects: Mapped[int] = mapped_column(Integer, default=0)
+    comments_count: Mapped[int] = mapped_column(Integer, default=0)
+    tags_raw: Mapped[str] = mapped_column(Text, default="")
+    published_at: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    local_folder: Mapped[str | None] = mapped_column(Text, nullable=True)
+    images: Mapped[list["MaterialImage"]] = relationship(back_populates="material", cascade="all,delete")
+    tags: Mapped[list["MaterialTag"]] = relationship(back_populates="material", cascade="all,delete")
+
+class MaterialImage(Base):
+    __tablename__ = "material_image"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    material_id: Mapped[int] = mapped_column(ForeignKey("material.id"))
+    idx: Mapped[int] = mapped_column(Integer)
+    path: Mapped[str] = mapped_column(Text)
+    type: Mapped[str] = mapped_column(String(16), default="image")
+    material: Mapped["Material"] = relationship(back_populates="images")
+
+class Comment(Base):
+    __tablename__ = "comment"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    material_id: Mapped[int] = mapped_column(ForeignKey("material.id"), index=True)
+    rank: Mapped[int] = mapped_column(Integer)
+    author: Mapped[str] = mapped_column(String(128))
+    user_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    profile_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    text: Mapped[str] = mapped_column(Text, default="")
+    likes: Mapped[int] = mapped_column(Integer, default=0)
+    time: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    is_reply: Mapped[bool] = mapped_column(Boolean, default=False)
+    reply_to: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+class TagDimension(Base):
+    __tablename__ = "tag_dimension"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(64), unique=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    values: Mapped[list["TagValue"]] = relationship(back_populates="dimension", cascade="all,delete")
+
+class TagValue(Base):
+    __tablename__ = "tag_value"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    dimension_id: Mapped[int] = mapped_column(ForeignKey("tag_dimension.id"))
+    value: Mapped[str] = mapped_column(String(64))
+    alias: Mapped[list] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String(16), default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    dimension: Mapped["TagDimension"] = relationship(back_populates="values")
+    material_tags: Mapped[list["MaterialTag"]] = relationship(back_populates="tag_value")
+
+class MaterialTag(Base):
+    __tablename__ = "material_tag"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    material_id: Mapped[int] = mapped_column(ForeignKey("material.id"))
+    tag_value_id: Mapped[int] = mapped_column(ForeignKey("tag_value.id"))
+    source: Mapped[str] = mapped_column(String(16), default="ai")
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    confirmed_by_human: Mapped[bool] = mapped_column(Boolean, default=False)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    material: Mapped["Material"] = relationship(back_populates="tags")
+    tag_value: Mapped["TagValue"] = relationship(back_populates="material_tags")
+
+class TagSuggestion(Base):
+    __tablename__ = "tag_suggestion"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    dimension_name: Mapped[str] = mapped_column(String(64))
+    proposed_value: Mapped[str] = mapped_column(String(64))
+    material_id: Mapped[int | None] = mapped_column(ForeignKey("material.id"), nullable=True)
+    sample_context: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+class ScrapeJob(Base):
+    __tablename__ = "scrape_job"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    type: Mapped[str] = mapped_column(String(32))
+    status: Mapped[str] = mapped_column(String(16), default="queued")
+    params: Mapped[dict] = mapped_column(JSON, default=dict)
+    result_summary: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+class JobLog(Base):
+    __tablename__ = "job_log"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("scrape_job.id"), index=True)
+    level: Mapped[str] = mapped_column(String(16), default="info")
+    message: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

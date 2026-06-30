@@ -22,3 +22,8 @@ include = ["sidecar*"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 pythonpath = ["."]
+# models.py 的 default=datetime.utcnow 是 brief 原文（verbatim），在 Py3.12+ 触发
+# DeprecationWarning；保留模型代码不动，仅在测试运行层定向静默该条警告以保持输出纯净。
+filterwarnings = [
+    "ignore:datetime.datetime.utcnow:DeprecationWarning",
+]
