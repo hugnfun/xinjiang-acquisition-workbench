@@ -8,6 +8,10 @@ def create_app() -> FastAPI:
     @app.get("/health")
     def health():
         return {"ok": True}
+    from sidecar.api import materials, tags, jobs
+    app.include_router(materials.router)
+    app.include_router(tags.router)
+    app.include_router(jobs.router)
     return app
 
 def main():

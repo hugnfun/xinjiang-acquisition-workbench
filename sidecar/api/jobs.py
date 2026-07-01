@@ -1,0 +1,32 @@
+from fastapi import APIRouter
+from sidecar.db.session import get_session
+from sidecar.db.models import ScrapeJob, JobLog
+
+router = APIRouter()
+
+@router.get("/jobs")
+def list_jobs(limit: int = 50):
+    s = get_session()
+    jobs = s.query(ScrapeJob).order_by(ScrapeJob.created_at.desc()).limit(limit).all()
+    return [{
+        "id": j.id, "type": j.type, "status": j.status,
+        "created_at": j.created_at.isoformat() if j.created_at else None,
+        "started_at": j.started_at.isoformat() if j.started_at else None,
+        "finished_at": j.finished_at.isoformat() if j.finished_at else None,
+        "error": j.error,
+    } for j in jobs]
+
+@router.get("/jobs/{jid}")
+def get_job(jid: int):
+    s = get_session()
+    j = s.query(ScrapeJob).get(jid)
+    if not j:
+        return {"error": "not found"}
+    logs = s.query(JobLog).filter_by(job_id=jid).order_by(JobLog.created_at).all()
+    return {
+        "id": j.id, "type": j.type, "status": j.status,
+        "params": j.params, "result_summary": j.result_summary, "error": j.error,
+        "logs": [{"level": l.level, "message": l.message,
+                  "created_at": l.created_at.isoformat() if l.created_at else None}
+                 for l in logs],
+    }
