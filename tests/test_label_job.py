@@ -1,32 +1,6 @@
 from sidecar.llm import labeling as L
-
-def test_label_material_parses_tool_use(monkeypatch):
-    fake_tool_input = {
-        "labels": [
-            {"dimension": "content_type", "value": "风景震撼", "confidence": 0.9},
-            {"dimension": "season", "value": "秋", "confidence": 0.7},
-        ]
-    }
-    block = type("B", (), {"type": "tool_use", "input": fake_tool_input})()
-    class FakeResp:
-        content = [block]
-    class FakeClient:
-        @property
-        def messages(self):
-            return self
-        def create(self, **kw):
-            return FakeResp()
-    monkeypatch.setattr(L, "_get_client", lambda: FakeClient())
-    result = L.label_material(
-        title="赛里木湖", content="湖很蓝", image_paths=[],
-        taxonomy=[{"name":"content_type","values":["风景震撼"]}],
-    )
-    assert len(result) == 2
-    assert result[0]["value"] == "风景震撼"
-    assert result[0]["confidence"] == 0.9
-
-import os
 from pathlib import Path
+
 
 def _fake_chat_client(json_text: str):
     """Mock an openai client: client.chat.completions.create(...) -> resp.choices[0].message.content"""
@@ -97,3 +71,60 @@ def test_merge_labels_dedup_keeps_higher_confidence():
     assert by_key[("route","赛里木湖")]["confidence"] == 0.85
     assert by_key[("route","赛里木湖")]["source"] == "ai_vision"
     assert by_key[("content_type","风景震撼")]["source"] == "ai_vision"
+
+
+# ── Task 3: label_material 串行编排 ──
+
+def test_label_material_skips_vision_when_confident(monkeypatch):
+    # 文本全高置信度 → 不触发视觉
+    monkeypatch.setattr(L, "_get_text_client", lambda: _fake_chat_client(
+        '{"labels":[{"dimension":"content_type","value":"风景震撼","confidence":0.9,"out_of_taxonomy":false}]}'
+    ))
+    called = {"vision": False}
+    def boom(image_path, taxonomy, focus_dims=None):
+        called["vision"] = True
+        return []
+    monkeypatch.setattr(L, "label_with_vision", boom)
+    result = L.label_material("赛里木湖", "湖很蓝", [], [{"name":"content_type","values":["风景震撼"]}])
+    assert called["vision"] is False
+    assert len(result) == 1
+    assert result[0]["source"] == "ai_text"
+
+def test_label_material_triggers_vision_on_low_confidence(monkeypatch, tmp_path):
+    img = tmp_path / "t.jpg"
+    img.write_bytes(b"\xff\xd8fake")
+    # 文本有个低置信度标签 → 触发视觉，视觉补一条
+    monkeypatch.setattr(L, "_get_text_client", lambda: _fake_chat_client(
+        '{"labels":[{"dimension":"content_type","value":"风景震撼","confidence":0.4,"out_of_taxonomy":false}]}'
+    ))
+    monkeypatch.setattr(L, "_get_vision_client", lambda: _fake_chat_client(
+        '{"labels":[{"dimension":"route","value":"赛里木湖","confidence":0.85,"out_of_taxonomy":false}]}'
+    ))
+    result = L.label_material("赛里木湖", "湖很蓝", [img], [{"name":"content_type","values":["风景震撼"]},{"name":"route","values":["赛里木湖"]}])
+    # 合并后 2 条：文本的风景震撼(0.4) + 视觉的赛里木湖(0.85)
+    assert len(result) == 2
+    sources = {r["source"] for r in result}
+    assert sources == {"ai_text", "ai_vision"}
+
+def test_label_material_vision_failure_degrades_gracefully(monkeypatch, tmp_path):
+    img = tmp_path / "t.jpg"
+    img.write_bytes(b"\xff\xd8fake")
+    monkeypatch.setattr(L, "_get_text_client", lambda: _fake_chat_client(
+        '{"labels":[{"dimension":"content_type","value":"风景震撼","confidence":0.4,"out_of_taxonomy":false}]}'
+    ))
+    def boom(image_path, taxonomy, focus_dims=None):
+        raise RuntimeError("ollama down")
+    monkeypatch.setattr(L, "label_with_vision", boom)
+    result = L.label_material("赛里木湖", "湖很蓝", [img], [{"name":"content_type","values":["风景震撼"]}])
+    # 视觉挂了 → 降级只用文本
+    assert len(result) == 1
+    assert result[0]["source"] == "ai_text"
+
+def test_label_material_no_image_skips_vision(monkeypatch):
+    # 低置信度但没有图 → 跳过视觉，仅返回文本标签
+    monkeypatch.setattr(L, "_get_text_client", lambda: _fake_chat_client(
+        '{"labels":[{"dimension":"content_type","value":"风景震撼","confidence":0.4,"out_of_taxonomy":false}]}'
+    ))
+    result = L.label_material("赛里木湖", "湖很蓝", [], [{"name":"content_type","values":["风景震撼"]}])
+    assert len(result) == 1
+    assert result[0]["source"] == "ai_text"
