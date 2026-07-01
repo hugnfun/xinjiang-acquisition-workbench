@@ -68,11 +68,19 @@ def label_with_text(title: str, content: str, taxonomy: list) -> list:
 
 
 def _encode_image_block(path) -> dict:
-    """OpenAI 视觉格式的 image block（data URL）。"""
-    data = base64.standard_b64encode(Path(path).read_bytes()).decode()
-    ext = Path(path).suffix.lstrip(".").lower()
-    media = "jpeg" if ext in ("jpg", "jpeg") else ext or "jpeg"
-    return {"type": "image_url", "image_url": {"url": f"data:image/{media};base64,{data}"}}
+    """读图并用 Pillow 转成真 JPEG 再 base64。
+
+    小红书下载的图常是 WebP 套 .jpg 后缀，而 Ollama 不支持 WebP
+    （实测 0.30.7 + qwen3-vl:8b 喂 WebP 直接 400 "Failed to load image"）。
+    不能按扩展名声明 media_type——必须按真实字节转成可加载的 JPEG。
+    """
+    import io
+    from PIL import Image
+    img = Image.open(path)
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, format="JPEG")
+    data = base64.standard_b64encode(buf.getvalue()).decode()
+    return {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{data}"}}
 
 
 def label_with_vision(image_path, taxonomy: list, focus_dims=None) -> list:

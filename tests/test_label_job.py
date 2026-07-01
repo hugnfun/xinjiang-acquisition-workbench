@@ -1,5 +1,13 @@
 from sidecar.llm import labeling as L
 from pathlib import Path
+import base64
+from PIL import Image
+
+
+def _real_image(path, fmt="JPEG"):
+    """造一张真实可解码的图（Pillow 生成），避免假字节。"""
+    Image.new("RGB", (8, 8), (10, 20, 30)).save(path, format=fmt)
+    return path
 
 
 def _fake_chat_client(json_text: str):
@@ -44,10 +52,23 @@ def test_label_with_text(monkeypatch):
     assert result[0]["confidence"] == 0.9
     assert result[0]["source"] == "ai_text"
 
+def test_encode_image_block_converts_webp_to_jpeg(tmp_path):
+    # 小红书下载的图常是 WebP 套 .jpg 后缀；Ollama 不支持 WebP，
+    # _encode_image_block 必须把真实格式转成可加载的 JPEG（按字节判定，不信扩展名）。
+    webp_file = tmp_path / "fake.jpg"  # 扩展名 jpg，内容 WebP
+    Image.new("RGB", (8, 8), (10, 20, 30)).save(webp_file, format="WEBP")
+    block = L._encode_image_block(webp_file)
+    assert block["type"] == "image_url"
+    url = block["image_url"]["url"]
+    assert url.startswith("data:image/jpeg;base64,")
+    # 解码出来的字节必须是真 JPEG（FF D8 FF），不是 WebP（RIFF）
+    b64 = url.split("base64,", 1)[1]
+    raw = base64.standard_b64decode(b64)
+    assert raw[:3] == b"\xff\xd8\xff", f"expected JPEG magic FF D8 FF, got {raw[:4].hex()}"
+
 def test_label_with_vision(monkeypatch, tmp_path):
-    # 造一张假图
-    img = tmp_path / "t.jpg"
-    img.write_bytes(b"\xff\xd8\xff\xe0fake")
+    # 造一张真实可解码的图
+    img = _real_image(tmp_path / "t.jpg")
     monkeypatch.setattr(L, "_get_vision_client", lambda: _fake_chat_client(
         '{"labels":[{"dimension":"route","value":"赛里木湖","confidence":0.85,"out_of_taxonomy":false}]}'
     ))
@@ -91,8 +112,7 @@ def test_label_material_skips_vision_when_confident(monkeypatch):
     assert result[0]["source"] == "ai_text"
 
 def test_label_material_triggers_vision_on_low_confidence(monkeypatch, tmp_path):
-    img = tmp_path / "t.jpg"
-    img.write_bytes(b"\xff\xd8fake")
+    img = _real_image(tmp_path / "t.jpg")
     # 文本有个低置信度标签 → 触发视觉，视觉补一条
     monkeypatch.setattr(L, "_get_text_client", lambda: _fake_chat_client(
         '{"labels":[{"dimension":"content_type","value":"风景震撼","confidence":0.4,"out_of_taxonomy":false}]}'
