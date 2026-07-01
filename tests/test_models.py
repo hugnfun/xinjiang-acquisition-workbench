@@ -19,3 +19,16 @@ def test_tag_dimension_value_relationship(tmp_path, monkeypatch):
     s.add(TagValue(dimension_id=d.id, value="风景震撼", alias=[])); s.commit()
     assert len(d.values) == 1
     assert d.values[0].value == "风景震撼"
+
+
+def test_get_engine_caches_and_invalidates_on_db_path(tmp_path, monkeypatch):
+    from sidecar import config
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "a.db")
+    e1 = get_engine()
+    e2 = get_engine()
+    # 相同 DB_PATH → 同一 engine（缓存命中）
+    assert e1 is e2
+    # 不同 DB_PATH → 新 engine（缓存失效重建）
+    monkeypatch.setattr(config, "DB_PATH", tmp_path / "b.db")
+    e3 = get_engine()
+    assert e3 is not e1
