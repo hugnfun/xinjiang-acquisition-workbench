@@ -1,8 +1,17 @@
 import type { MaterialSummary, MaterialDetail, TagDimensionView, JobView } from '../types/models';
 
-const BASE = (import.meta as any).env.VITE_SIDECAR_PORT
-  ? `http://127.0.0.1:${(import.meta as any).env.VITE_SIDECAR_PORT}`
-  : 'http://127.0.0.1:8765';
+function getPort(): string {
+  // 1. Port injected by Tauri (main.rs spawns the sidecar on a free port and
+  //    evals `window.__SIDECAR_PORT__ = <port>` into the webview).
+  const injected = (window as any).__SIDECAR_PORT__;
+  if (injected) return String(injected);
+  // 2. Vite env override (for non-Tauri / `npm run dev` workflows).
+  const env = (import.meta as any).env.VITE_SIDECAR_PORT;
+  if (env) return String(env);
+  // 3. Fallback.
+  return '8765';
+}
+const BASE = `http://127.0.0.1:${getPort()}`;
 
 async function get<T>(path: string): Promise<T> {
   const r = await fetch(`${BASE}${path}`);
