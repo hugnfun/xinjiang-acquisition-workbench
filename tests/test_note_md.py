@@ -15,6 +15,25 @@ def test_parse_content():
     n = parse_note_md(FIXTURE.read_text(encoding="utf-8"))
     assert "这是正文内容" in n.content
 
+def test_parse_content_preserves_interior_blank_lines():
+    text = """# 标题
+
+## 元数据
+
+## 正文
+
+第一段。
+
+第二段。
+
+## 图片
+"""
+    n = parse_note_md(text)
+    assert "第一段。" in n.content
+    assert "第二段。" in n.content
+    # 段落间空行必须保留（首尾空行去掉）
+    assert "第一段。\n\n第二段。" in n.content
+
 def test_parse_images():
     n = parse_note_md(FIXTURE.read_text(encoding="utf-8"))
     assert n.image_paths == ["images/abc_1.jpg", "images/abc_2.jpg"]

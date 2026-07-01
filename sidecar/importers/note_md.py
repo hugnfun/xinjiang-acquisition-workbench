@@ -84,9 +84,9 @@ def parse_note_md(text: str) -> ParsedNote:
     for m in _META_RE.finditer(meta_block):
         metadata[m.group("k")] = m.group("v").strip()
 
-    content = sections.get("正文", "").strip()
-    # 去掉首尾空行
-    content = "\n".join(l for l in content.splitlines() if l.strip())
+    content = sections.get("正文", "")
+    # 去掉首尾空行，保留段落间空行（strip 处理首尾，splitlines 保留内部空行）
+    content = "\n".join(content.strip().splitlines())
 
     image_paths = _IMG_RE.findall(sections.get("图片", ""))
 
