@@ -11,15 +11,23 @@ function getPort(): string {
   // 3. Fallback.
   return '8765';
 }
-const BASE = `http://127.0.0.1:${getPort()}`;
+// LAZY: computed per-request, not at module load. Tauri's setup() hook evals
+// `window.__SIDECAR_PORT__ = <port>` AFTER the webview's JS modules load, so a
+// module-load `const BASE` would read an undefined port and fall back to 8765
+// while the real sidecar runs on a random free port → ECONNREFUSED. By the
+// time any real fetch fires (post-mount useEffect / event handler), the eval
+// has run and the injected port is set.
+function baseUrl(): string {
+  return `http://127.0.0.1:${getPort()}`;
+}
 
 async function get<T>(path: string): Promise<T> {
-  const r = await fetch(`${BASE}${path}`);
+  const r = await fetch(`${baseUrl()}${path}`);
   if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
   return r.json();
 }
 async function post<T>(path: string, body: any): Promise<T> {
-  const r = await fetch(`${BASE}${path}`, {
+  const r = await fetch(`${baseUrl()}${path}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
@@ -37,5 +45,5 @@ export const api = {
   triggerLabel: () => post<{ job_id: number }>(`/jobs/label`, {}),
   confirmTag: (mid: number, tag_value_id: number, action: 'confirm' | 'reject') =>
     post(`/materials/${mid}/tags`, { tag_value_id, action }),
-  getImageUrl: (mid: number, path: string) => `${BASE}/materials/${mid}/image?path=${encodeURIComponent(path)}`,
+  getImageUrl: (mid: number, path: string) => `${baseUrl()}/materials/${mid}/image?path=${encodeURIComponent(path)}`,
 };
