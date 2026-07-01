@@ -34,3 +34,32 @@ def test_list_tags(tmp_path, monkeypatch):
     assert r.status_code == 200
     names = {d["name"] for d in r.json()}
     assert "content_type" in names
+
+def test_merge_suggestion_persists_alias(tmp_path, monkeypatch):
+    from sidecar.db.session import get_session
+    from sidecar.db.models import TagDimension, TagValue, TagSuggestion
+    client = _setup(tmp_path, monkeypatch)
+    # Seed a pending suggestion targeting an existing TagValue (alias starts [])
+    s = get_session()
+    d = s.query(TagDimension).filter_by(name="content_type").first()
+    tv = d.values[0]
+    sg = TagSuggestion(dimension_name="content_type", proposed_value="新别名",
+                       material_id=None, sample_context="ctx", status="pending")
+    s.add(sg); s.commit()
+    sg_id, tv_id = sg.id, tv.id
+    s.close()
+    r = client.post(f"/tags/suggestions/{sg_id}",
+                    json={"action": "merge", "merge_into_value_id": tv_id})
+    assert r.status_code == 200
+    # Fresh session: alias MUST contain proposed_value, suggestion merged
+    s2 = get_session()
+    tv2 = s2.query(TagValue).get(tv_id)
+    assert "新别名" in tv2.alias
+    sg2 = s2.query(TagSuggestion).get(sg_id)
+    assert sg2.status == "merged"
+    s2.close()
+
+def test_get_job_missing_returns_404(tmp_path, monkeypatch):
+    client = _setup(tmp_path, monkeypatch)
+    r = client.get("/jobs/999999")
+    assert r.status_code == 404

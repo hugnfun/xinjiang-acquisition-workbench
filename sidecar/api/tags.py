@@ -66,7 +66,7 @@ def act_suggestion(sid: int, body: SuggestionActionIn):
     elif body.action == "merge" and body.merge_into_value_id:
         tv = s.query(TagValue).get(body.merge_into_value_id)
         if tv:
-            tv.alias.append(sg.proposed_value)
+            tv.alias = [*tv.alias, sg.proposed_value]
         sg.status = "merged"
     elif body.action == "reject":
         sg.status = "rejected"

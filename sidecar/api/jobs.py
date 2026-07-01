@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from sidecar.db.session import get_session
 from sidecar.db.models import ScrapeJob, JobLog
 
@@ -21,7 +21,7 @@ def get_job(jid: int):
     s = get_session()
     j = s.query(ScrapeJob).get(jid)
     if not j:
-        return {"error": "not found"}
+        raise HTTPException(404)
     logs = s.query(JobLog).filter_by(job_id=jid).order_by(JobLog.created_at).all()
     return {
         "id": j.id, "type": j.type, "status": j.status,
