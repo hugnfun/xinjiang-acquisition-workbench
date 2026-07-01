@@ -1,9 +1,17 @@
-function App() {
+import { useState } from 'react';
+import Materials from './routes/Materials';
+import Jobs from './routes/Jobs';
+
+export default function App() {
+  const [tab, setTab] = useState<'materials' | 'jobs'>('materials');
   return (
-    <div style={{ fontFamily: 'system-ui', padding: 24 }}>
-      <h1>新疆定制游获客工作台</h1>
-      <p>模块 A · 素材库 + 问题池管家</p>
+    <div style={{ fontFamily: 'system-ui' }}>
+      <div style={{ borderBottom: '1px solid #eee', padding: '8px 16px' }}>
+        <strong style={{ marginRight: 24 }}>新疆定制游获客工作台</strong>
+        <button onClick={() => setTab('materials')} style={{ fontWeight: tab==='materials'?700:400 }}>素材库</button>
+        <button onClick={() => setTab('jobs')} style={{ fontWeight: tab==='jobs'?700:400, marginLeft: 8 }}>任务中心</button>
+      </div>
+      {tab === 'materials' ? <Materials /> : <Jobs />}
     </div>
   );
 }
-export default App;
