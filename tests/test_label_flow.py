@@ -63,3 +63,32 @@ def test_run_label_job_marks_failed_when_all_fail(tmp_path, monkeypatch):
     # 每篇素材都应有一条 error 级日志
     err_logs = s2.query(JobLog).filter_by(job_id=job.id, level="error").all()
     assert len(err_logs) >= 1
+
+
+def test_source_propagated_to_material_tag(tmp_path, monkeypatch):
+    from pathlib import Path
+    monkeypatch.setattr("sidecar.config.DB_PATH", tmp_path / "t.db")
+    monkeypatch.setattr("sidecar.config.MEDIA_DIR", tmp_path / "media")
+    seed.seed_taxonomy()
+    imp.import_folder(Path(__file__).parent / "fixtures" / "import_root")
+
+    def fake_label(title, content, image_paths, taxonomy):
+        return [
+            {"dimension": "content_type", "value": "风景震撼", "confidence": 0.9, "out_of_taxonomy": False, "source": "ai_text"},
+            {"dimension": "content_type", "value": "测试视觉标签", "confidence": 0.8, "out_of_taxonomy": True, "source": "ai_vision"},
+        ]
+    monkeypatch.setattr(labeljob, "label_material", fake_label)
+
+    from sidecar.db.session import get_session
+    from sidecar.db.models import ScrapeJob, MaterialTag
+    s = get_session()
+    job = ScrapeJob(type="label_batch", status="queued", params={})
+    s.add(job); s.commit()
+
+    labeljob.run_label_job(job.id)
+
+    s2 = get_session()
+    tags = s2.query(MaterialTag).all()
+    # 风景震撼是 in-taxonomy → MaterialTag，source=ai_text
+    mt = [t for t in tags]
+    assert any(t.source == "ai_text" for t in mt), f"expected ai_text source, got {[t.source for t in mt]}"

@@ -64,7 +64,7 @@ def run_label_job(job_id: int):
                 if existing:
                     continue
                 s.add(MaterialTag(
-                    material_id=m.id, tag_value_id=tv.id, source="ai",
+                    material_id=m.id, tag_value_id=tv.id, source=lb.get("source", "ai_text"),
                     confidence=conf, confirmed_by_human=False))
             labeled += 1
             _log(s, job_id, f"素材 {m.id} 完成 ({len(labels)} 标签)")
