@@ -56,16 +56,19 @@ fn resolve_python() -> (String, PathBuf) {
 }
 
 /// Bind a free loopback port, spawn the python sidecar with that port, and
-/// return the port.
+/// return the port AND the child handle.
 ///
 /// INTEGRATION BUG #2 FIX: the brief read the sidecar's stdout to discover the
 /// port — but we already bound a free port (`TcpListener::bind("127.0.0.1:0")`)
 /// and passed it via `--port`, so reading stdout is redundant and the
 /// `BufReader` loop risks blocking. Instead: stdout → `Stdio::null()` (we
 /// don't need it), stderr → `Stdio::inherit()` (so sidecar errors are visible
-/// in the terminal), `std::mem::forget(child)` to keep it alive, return the
-/// bound port. No stdout reading.
-fn spawn_sidecar() -> u16 {
+/// in the terminal), return the bound port and the Child. No stdout reading.
+///
+/// KILL-ON-EXIT FIX: previously `std::mem::forget(child)` orphaned the python
+/// sidecar (the process kept running after the Tauri app exited). Now we RETURN
+/// the Child so the caller can retain it and `.kill()` it on app exit.
+fn spawn_sidecar() -> (u16, std::process::Child) {
     let listener = std::net::TcpListener::bind("127.0.0.1:0")
         .expect("failed to bind free port for sidecar");
     let port = listener.local_addr().unwrap().port();
@@ -85,12 +88,10 @@ fn spawn_sidecar() -> u16 {
         .spawn()
         .expect("failed to spawn sidecar");
 
-    // Keep the sidecar alive for the lifetime of the app; we never wait on it.
-    std::mem::forget(child);
-    port
+    (port, child)
 }
 
 fn main() {
-    let port = spawn_sidecar();
-    tauri_app_lib::run(port);
+    let (port, child) = spawn_sidecar();
+    tauri_app_lib::run(port, child);
 }
