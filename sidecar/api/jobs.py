@@ -1,6 +1,9 @@
+import asyncio
 from fastapi import APIRouter, HTTPException
 from sidecar.db.session import get_session
 from sidecar.db.models import ScrapeJob, JobLog
+from sidecar.jobs.queue import submit
+from sidecar.jobs.label import run_label_job
 
 router = APIRouter()
 
@@ -30,3 +33,12 @@ def get_job(jid: int):
                   "created_at": l.created_at.isoformat() if l.created_at else None}
                  for l in logs],
     }
+
+@router.post("/jobs/label")
+def trigger_label():
+    s = get_session()
+    from sidecar.db.models import ScrapeJob
+    job = ScrapeJob(type="label_batch", status="queued", params={})
+    s.add(job); s.commit(); s.refresh(job)
+    submit(asyncio.to_thread(run_label_job, job.id))
+    return {"job_id": job.id}
