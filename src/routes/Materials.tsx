@@ -6,29 +6,56 @@ export default function Materials() {
   const [list, setList] = useState<MaterialSummary[]>([]);
   const [selected, setSelected] = useState<MaterialDetail | null>(null);
   const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [tagErr, setTagErr] = useState<string | null>(null);
 
-  useEffect(() => {
-    api.getMaterials(50, 0).then(r => setList(r.items));
-  }, []);
+  const loadList = async () => {
+    setErr(null);
+    try {
+      const r = await api.getMaterials(50, 0);
+      setList(r.items);
+    } catch (e: any) {
+      setErr(e?.message || String(e));
+    }
+  };
+
+  useEffect(() => { loadList(); }, []);
 
   const open = async (id: number) => {
     setLoading(true);
-    const d = await api.getMaterial(id);
-    setSelected(d); setLoading(false);
+    try {
+      const d = await api.getMaterial(id);
+      setSelected(d);
+    } catch (e: any) {
+      setErr(e?.message || String(e));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const onTagAction = async (tvId: number, action: 'confirm' | 'reject') => {
     if (!selected) return;
-    await api.confirmTag(selected.id, tvId, action);
-    const d = await api.getMaterial(selected.id);
-    setSelected(d);
-    const r = await api.getMaterials(50, 0);
-    setList(r.items);
+    setTagErr(null);
+    try {
+      await api.confirmTag(selected.id, tvId, action);
+      const d = await api.getMaterial(selected.id);
+      setSelected(d);
+      const r = await api.getMaterials(50, 0);
+      setList(r.items);
+    } catch (e: any) {
+      setTagErr(e?.message || String(e));
+    }
   };
 
   return (
     <div style={{ display: 'flex', height: '100vh' }}>
       <div style={{ width: '40%', overflow: 'auto', borderRight: '1px solid #eee' }}>
+        {err && (
+          <div style={{ padding: 12, color: '#b00020', background: '#fdecea' }}>
+            加载素材失败：{err}
+            <button onClick={loadList} style={{ marginLeft: 8 }}>重试</button>
+          </div>
+        )}
         {list.map(m => (
           <div key={m.id} onClick={() => open(m.id)}
                style={{ padding: 12, cursor: 'pointer', borderBottom: '1px solid #f5f5f5' }}>
@@ -53,6 +80,11 @@ export default function Materials() {
       </div>
       <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
         {loading && <p>加载中...</p>}
+        {tagErr && (
+          <div style={{ color: '#b00020', background: '#fdecea', padding: 8, marginBottom: 8 }}>
+            标签操作失败：{tagErr}
+          </div>
+        )}
         {selected && (
           <>
             <h2>{selected.title}</h2>
