@@ -32,3 +32,34 @@ def test_run_label_job_writes_tags(tmp_path, monkeypatch):
     assert job.status == "done"
 
 from pathlib import Path
+
+
+def test_run_label_job_marks_failed_when_all_fail(tmp_path, monkeypatch):
+    monkeypatch.setattr("sidecar.config.DB_PATH", tmp_path / "t.db")
+    monkeypatch.setattr("sidecar.config.MEDIA_DIR", tmp_path / "media")
+    seed.seed_taxonomy()
+    imp.import_folder(Path(__file__).parent / "fixtures" / "import_root")
+
+    def fake_label(*a):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(labeljob, "label_material", fake_label)
+
+    from sidecar.db.session import get_session
+    from sidecar.db.models import ScrapeJob, JobLog
+    s = get_session()
+    job = ScrapeJob(type="label_batch", status="queued", params={})
+    s.add(job); s.commit()
+
+    labeljob.run_label_job(job.id)
+
+    s2 = get_session()
+    job = s2.query(ScrapeJob).get(job.id)
+    # 全部素材打标失败时必须暴露为 failed（而非伪装 done+0）
+    assert job.status == "failed"
+    assert job.error
+    assert "boom" in job.error
+    assert "失败" in job.error
+    assert job.result_summary["failed_count"] >= 1
+    # 每篇素材都应有一条 error 级日志
+    err_logs = s2.query(JobLog).filter_by(job_id=job.id, level="error").all()
+    assert len(err_logs) >= 1
