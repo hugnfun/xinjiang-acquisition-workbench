@@ -11,7 +11,7 @@ interface JobDetail {
 
 export default function Jobs() {
   const [jobs, setJobs] = useState<JobView[]>([]);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<'label' | 'question-pool' | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [detail, setDetail] = useState<Record<number, JobDetail>>({});
@@ -25,17 +25,21 @@ export default function Jobs() {
     return () => clearInterval(t);
   }, []);
 
-  const trigger = async () => {
-    setBusy(true); setErr(null);
+  const trigger = async (kind: 'label' | 'question-pool') => {
+    setBusy(kind); setErr(null);
     try {
-      await api.triggerLabel();
+      if (kind === 'label') await api.triggerLabel();
+      else await api.triggerQuestionPool();
     } catch (e: any) {
       setErr(e?.message || String(e));
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
     setTimeout(refresh, 500);
   };
+
+  // 防重：有 job 正在 running 时禁用触发按钮
+  const running = jobs.some(j => j.status === 'running' || j.status === 'queued');
 
   const toggle = async (id: number) => {
     if (expanded === id) { setExpanded(null); return; }
@@ -52,9 +56,17 @@ export default function Jobs() {
   return (
     <div style={{ padding: 16 }}>
       <h2>任务中心</h2>
-      <button onClick={trigger} disabled={busy}>
-        {busy ? '提交中...' : '▶ 触发批量打标（全部素材）'}
-      </button>
+      <div style={{ marginBottom: 8 }}>
+        <button onClick={() => trigger('label')} disabled={busy !== null || running} style={{ marginRight: 8 }}>
+          {busy === 'label' ? '提交中...' : '▶ 触发批量打标（全部素材）'}
+        </button>
+        <button onClick={() => trigger('question-pool')} disabled={busy !== null || running}>
+          {busy === 'question-pool' ? '提交中...' : '▶ 问题池冷启动（评论→聚类→命名）'}
+        </button>
+        {running && (
+          <span style={{ marginLeft: 12, color: '#996600' }}>⏳ 有任务运行中，请等待完成</span>
+        )}
+      </div>
       {err && (
         <div style={{ marginTop: 8, padding: 8, color: '#b00020', background: '#fdecea' }}>
           {err}

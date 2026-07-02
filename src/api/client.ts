@@ -59,6 +59,7 @@ export const api = {
   getJobs: () => get<JobView[]>(`/jobs`),
   getJob: (id: number) => get<any>(`/jobs/${id}`),
   triggerLabel: () => post<{ job_id: number }>(`/jobs/label`, {}),
+  triggerQuestionPool: () => post<{ job_id: number }>(`/jobs/question-pool`, {}),
   confirmTag: (mid: number, tag_value_id: number, action: 'confirm' | 'reject') =>
     post(`/materials/${mid}/tags`, { tag_value_id, action }),
   // Image URLs are synchronous (<img src>), so they can't await resolvePort.

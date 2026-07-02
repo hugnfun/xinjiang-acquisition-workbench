@@ -49,7 +49,14 @@ fn resolve_python() -> (String, PathBuf) {
         if candidate.exists() {
             candidate.to_string_lossy().into_owned()
         } else {
-            "python3".to_string()
+            // DO NOT fall back to global `python3` — the global interpreter's
+            // `sidecar` install is stale/unsynced (it kept serving an Anthropic
+            // build after we switched to DeepSeek), so a silent fallback
+            // produces a working-looking but WRONG sidecar. Fail loudly instead.
+            panic!(
+                "未找到 .venv/bin/python (在 {})。请先 `python3 -m venv .venv && .venv/bin/pip install -e .[dev]`，或设 SIDECAR_PY 环境变量。",
+                project_root.display()
+            );
         }
     };
     (py, project_root)
@@ -93,5 +100,6 @@ fn spawn_sidecar() -> (u16, std::process::Child) {
 
 fn main() {
     let (port, child) = spawn_sidecar();
+    eprintln!("[tauri] sidecar spawned on port {port}, pid {}", child.id());
     tauri_app_lib::run(port, child);
 }
