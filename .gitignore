@@ -31,3 +31,6 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 src-tauri/target/
+
+# 本地密钥，勿提交
+.env

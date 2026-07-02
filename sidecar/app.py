@@ -1,7 +1,12 @@
 import argparse
 import json
 import sys
+from pathlib import Path
+from dotenv import load_dotenv
 from fastapi import FastAPI
+
+# 启动时加载项目根的 .env（DEEPSEEK_API_KEY 等密钥存这里，不进 git）
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 def create_app() -> FastAPI:
     app = FastAPI(title="workbench-sidecar")
