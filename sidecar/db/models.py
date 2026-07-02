@@ -107,3 +107,36 @@ class JobLog(Base):
     level: Mapped[str] = mapped_column(String(16), default="info")
     message: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+from sqlalchemy import LargeBinary
+
+class QuestionCluster(Base):
+    __tablename__ = "question_cluster"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(64), default="")
+    description: Mapped[str] = mapped_column(Text, default="")
+    question_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    questions: Mapped[list["Question"]] = relationship(back_populates="cluster")
+
+class Question(Base):
+    __tablename__ = "question"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    normalized_text: Mapped[str] = mapped_column(Text, default="")
+    raw_text: Mapped[str] = mapped_column(Text, default="")
+    source_ref: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_type: Mapped[str] = mapped_column(String(32), default="comment")
+    embedding: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    cluster_id: Mapped[int | None] = mapped_column(ForeignKey("question_cluster.id"), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    cluster: Mapped["QuestionCluster | None"] = relationship(back_populates="questions")
+
+class Asset(Base):
+    __tablename__ = "asset"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    type: Mapped[str] = mapped_column(String(32))  # title|selling_point|hook|cta
+    text: Mapped[str] = mapped_column(Text, default="")
+    derived_from: Mapped[list] = mapped_column(JSON, default=list)  # [material_id,...]
+    tags: Mapped[list] = mapped_column(JSON, default=list)
+    disliked: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
