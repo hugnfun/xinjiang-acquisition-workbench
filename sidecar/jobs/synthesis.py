@@ -1,7 +1,7 @@
 from datetime import datetime
-from sidecar.db.session import get_session
+from sidecar.db.session import session_scope
 from sidecar.db.models import (Material, MaterialTag, TagValue, TagDimension,
-                               Asset, ScrapeJob, JobLog)
+                               Asset, ScrapeJob)
 from sidecar.llm import task_client as tc
 
 # 合成类型 → LLM 返回 dict 的键名
@@ -14,7 +14,10 @@ TYPE_KEY = {
 
 
 def _material_data(s, material_ids):
-    """组装送入 LLM 的素材数据：标题 / 正文 / dim:value 形式标签。"""
+    """组装送入 LLM 的素材数据：标题 / 正文 / dim:value 形式标签。
+
+    返回纯标量 dict 列表，session 关闭后仍可用（不在 MiniMax 调用期间占连接）。
+    """
     out = []
     for mid in material_ids:
         m = s.query(Material).get(mid)
@@ -32,33 +35,34 @@ def _material_data(s, material_ids):
 
 
 def run_synthesis(material_ids: list[int], types: list[str], job_id: int | None = None):
-    s = get_session()
     if not material_ids:
         raise ValueError("无素材")
-    mats = _material_data(s, material_ids)
+    # 短 session 读素材数据，MiniMax 调用期间不持有 session
+    with session_scope() as s:
+        mats = _material_data(s, material_ids)
     if not mats:
         raise ValueError("无素材")
-    result = tc.synthesize(mats, types)
+    result = tc.synthesize(mats, types)  # 无 session 持有
     written = 0
-    for t in types:
-        key = TYPE_KEY.get(t)
-        if not key:
-            continue
-        for text in result.get(key, []):
-            if not text or not text.strip():
+    with session_scope() as s:
+        for t in types:
+            key = TYPE_KEY.get(t)
+            if not key:
                 continue
-            s.add(Asset(
-                type=t, text=text.strip(),
-                derived_from=list(material_ids),
-                tags=[m["title"][:20] for m in mats[:3]],
-                disliked=False,
-            ))
-            written += 1
-    s.commit()
+            for text in result.get(key, []):
+                if not text or not text.strip():
+                    continue
+                s.add(Asset(
+                    type=t, text=text.strip(),
+                    derived_from=list(material_ids),
+                    tags=[m["title"][:20] for m in mats[:3]],
+                    disliked=False,
+                ))
+                written += 1
     if job_id:
-        job = s.query(ScrapeJob).get(job_id)
-        job.status = "done"
-        job.result_summary = {"written": written, "types": types}
-        job.finished_at = datetime.utcnow()
-        s.commit()
+        with session_scope() as s:
+            job = s.query(ScrapeJob).get(job_id)
+            job.status = "done"
+            job.result_summary = {"written": written, "types": types}
+            job.finished_at = datetime.utcnow()
     return written

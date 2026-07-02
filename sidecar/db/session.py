@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import QueuePool
@@ -34,6 +35,27 @@ def get_engine():
 def get_session() -> Session:
     get_engine()
     return _SessionLocal()
+
+
+@contextmanager
+def session_scope():
+    """短生命周期 session：成功 commit、异常 rollback、退出即 close。
+
+    长 job（问题池/打标/合成）在 LLM/MiniMax/embedding 调用期间不得持有 session——
+    会与 FastAPI HTTP 线程争抢共享连接池导致 /jobs 卡死。改用本上下文：每个 DB
+    操作单元开一个短 session，LLM 调用前关闭，不长期占连接。
+    注意：commit 后 ORM 对象属性会 expire，需在 session 关闭前把要用到的标量
+    提取到普通 dict/tuple，否则访问会触发 DetachedInstanceError。
+    """
+    s = get_session()
+    try:
+        yield s
+        s.commit()
+    except Exception:
+        s.rollback()
+        raise
+    finally:
+        s.close()
 
 
 def init_db():
