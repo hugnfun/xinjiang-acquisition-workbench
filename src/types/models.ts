@@ -25,3 +25,14 @@ export interface JobView {
   created_at: string | null; started_at: string | null;
   finished_at: string | null; error: string | null;
 }
+export interface ClusterView {
+  id: number; name: string; description: string; question_count: number;
+}
+export interface QuestionView {
+  id: number; normalized_text: string; raw_text: string;
+  source_ref: number | null; source_type: string; cluster_id: number | null;
+}
+export interface AssetView {
+  id: number; type: string; text: string;
+  derived_from: number[]; tags: string[]; disliked: boolean;
+}

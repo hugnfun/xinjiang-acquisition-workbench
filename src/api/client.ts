@@ -1,4 +1,4 @@
-import type { MaterialSummary, MaterialDetail, TagDimensionView, JobView } from '../types/models';
+import type { MaterialSummary, MaterialDetail, TagDimensionView, JobView, ClusterView, QuestionView, AssetView } from '../types/models';
 
 function getPort(): string {
   // 1. Port injected by Tauri (main.rs spawns the sidecar on a free port and
@@ -34,6 +34,14 @@ async function post<T>(path: string, body: any): Promise<T> {
   if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
   return r.json();
 }
+async function put<T>(path: string, body: any): Promise<T> {
+  const r = await fetch(`${baseUrl()}${path}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+  return r.json();
+}
 
 export const api = {
   getMaterials: (limit = 50, offset = 0) =>
@@ -46,4 +54,21 @@ export const api = {
   confirmTag: (mid: number, tag_value_id: number, action: 'confirm' | 'reject') =>
     post(`/materials/${mid}/tags`, { tag_value_id, action }),
   getImageUrl: (mid: number, path: string) => `${baseUrl()}/materials/${mid}/image?path=${encodeURIComponent(path)}`,
+  getClusters: () => get<ClusterView[]>('/questions/clusters'),
+  getClusterQuestions: (cid: number) => get<QuestionView[]>(`/clusters/${cid}/questions`),
+  listQuestions: (clusterId?: number) =>
+    get<QuestionView[]>(`/questions${clusterId ? '?cluster_id=' + clusterId : ''}`),
+  renameCluster: (cid: number, name: string, description?: string) =>
+    put(`/clusters/${cid}`, { name, description }),
+  extractAssets: (material_ids: number[], types: string[]) =>
+    post<{ job_id: number }>('/synthesis/extract', { material_ids, types }),
+  listAssets: (type?: string) =>
+    get<AssetView[]>(`/assets${type ? '?type=' + type : ''}`),
+  updateAsset: (aid: number, body: { text?: string; disliked?: boolean }) =>
+    put(`/assets/${aid}`, body),
+  deleteAsset: async (aid: number) => {
+    const r = await fetch(`${baseUrl()}/assets/${aid}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+    return r.json();
+  },
 };
