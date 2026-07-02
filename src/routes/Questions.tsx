@@ -8,16 +8,28 @@ export default function Questions() {
   const [questions, setQuestions] = useState<QuestionView[]>([]);
   const [renaming, setRenaming] = useState<string>('');
 
-  useEffect(() => { api.getClusters().then(setClusters); }, []);
+  // race-guard：卸载或簇切换时丢弃过期响应，避免在已卸载组件上 setState
   useEffect(() => {
-    if (selectedCluster) api.getClusterQuestions(selectedCluster).then(setQuestions);
-    else setQuestions([]);
+    let active = true;
+    api.getClusters().then(list => { if (active) setClusters(list); });
+    return () => { active = false; };
+  }, []);
+  useEffect(() => {
+    if (!selectedCluster) { setQuestions([]); return; }
+    let active = true;
+    api.getClusterQuestions(selectedCluster).then(list => { if (active) setQuestions(list); });
+    return () => { active = false; };
   }, [selectedCluster]);
 
   const rename = async () => {
     if (!selectedCluster || !renaming.trim()) return;
-    await api.renameCluster(selectedCluster, renaming.trim());
-    api.getClusters().then(setClusters);
+    try {
+      await api.renameCluster(selectedCluster, renaming.trim());
+      setRenaming('');  // 改名成功后清空输入
+      api.getClusters().then(setClusters);
+    } catch (e) {
+      alert(`改名失败: ${e instanceof Error ? e.message : e}`);
+    }
   };
 
   return (
@@ -43,10 +55,8 @@ export default function Questions() {
               <div key={q.id} style={{ marginBottom: 12, borderBottom: '1px solid #f5f5f5', paddingBottom: 8 }}>
                 <div>{q.normalized_text}</div>
                 <div style={{ color: '#aaa', fontSize: 12 }}>原文: {q.raw_text}</div>
-                <div style={{ color: '#0066cc', fontSize: 12, cursor: 'pointer' }}
-                     onClick={() => window.open(`#material-${q.source_ref}`, '_blank')}>
-                  回溯评论 #{q.source_ref}
-                </div>
+                {/* 回溯到 /materials 该评论的路由尚未实现(spec 暂缓)；先纯文本显示来源，避免 #material-X 开垃圾页 */}
+                <div style={{ color: '#888', fontSize: 12 }}>来源评论 #{q.source_ref ?? '—'}</div>
               </div>
             ))}
           </>

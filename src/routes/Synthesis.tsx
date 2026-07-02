@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
 import type { AssetView } from '../types/models';
 
@@ -14,9 +14,19 @@ export default function Synthesis() {
   const [assets, setAssets] = useState<AssetView[]>([]);
   const [selectedMats, setSelectedMats] = useState<number[]>([]);
   const [busy, setBusy] = useState(false);
+  const refreshTimer = useRef<number | null>(null);
+
+  // race-guard：tab 快速切换时丢弃过期响应；卸载时清掉未触发的刷新定时器
+  useEffect(() => {
+    let active = true;
+    api.listAssets(tab).then(list => { if (active) setAssets(list); });
+    return () => { active = false; };
+  }, [tab]);
+  useEffect(() => () => {
+    if (refreshTimer.current) window.clearTimeout(refreshTimer.current);
+  }, []);
 
   const refresh = () => api.listAssets(tab).then(setAssets);
-  useEffect(() => { refresh(); }, [tab]);
 
   const extract = async () => {
     if (selectedMats.length === 0) { alert('请先在素材库选素材（输入 id 逗号分隔）'); return; }
@@ -24,10 +34,15 @@ export default function Synthesis() {
     try {
       const { job_id } = await api.extractAssets(selectedMats, [tab]);
       alert(`提炼任务已提交 (job ${job_id})，稍后刷新查看`);
-      setTimeout(refresh, 3000);
+      if (refreshTimer.current) window.clearTimeout(refreshTimer.current);
+      refreshTimer.current = window.setTimeout(refresh, 3000);
+    } catch (e) {
+      alert(`提炼失败: ${e instanceof Error ? e.message : e}`);
     } finally { setBusy(false); }
   };
 
+  // dislike 后 refresh：服务端 GET /assets 默认 include_disliked=false 已过滤，
+  // 点踩的卡片会从列表消失（非 bug）
   const dislike = async (aid: number) => {
     await api.updateAsset(aid, { disliked: true });
     refresh();
