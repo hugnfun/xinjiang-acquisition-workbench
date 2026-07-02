@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from dotenv import load_dotenv
@@ -8,6 +9,18 @@ from fastapi.middleware.cors import CORSMiddleware
 
 # 启动时加载项目根的 .env（DEEPSEEK_API_KEY 等密钥存这里，不进 git）
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
+# 关键：让本地调用（ollama @ localhost:11434）绕过系统代理。
+# 这台机器有 Clash 代理 (http_proxy/https_proxy=127.0.0.1:7890)，openai SDK 用的
+# httpx 默认读这些 env，会把连 ollama 的请求也发给 Clash → 卡死（问题池 job 因此挂起）。
+# 外网调用（DeepSeek）仍走代理；localhost/127.0.0.1 绕过。
+_no_proxy = os.environ.get("NO_PROXY", "")
+_extras = {"localhost", "127.0.0.1", "::1"}
+existing = {x.strip() for x in _no_proxy.split(",") if x.strip()}
+missing = _extras - existing
+if missing:
+    os.environ["NO_PROXY"] = (_no_proxy + "," if _no_proxy else "") + ",".join(sorted(_extras | missing))
+    os.environ["no_proxy"] = os.environ["NO_PROXY"]  # httpx 也读小写
 
 def create_app() -> FastAPI:
     app = FastAPI(title="workbench-sidecar")
