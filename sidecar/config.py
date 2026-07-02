@@ -45,4 +45,9 @@ EMBEDDING_API_BASE = os.environ.get("EMBEDDING_API_BASE", "http://localhost:1143
 EMBEDDING_API_KEY = os.environ.get("EMBEDDING_API_KEY", "ollama")
 
 # ── 聚类：余弦相似度阈值，>此值连通成簇 ──
+# 不要轻易下调！聚类是连通分量(传递闭包: A~B 且 B~C 即同簇)，降阈值会链式合并：
+# 实测 313 条 embedding 上 0.78→最大簇 58(合理)；0.72→最大簇 193(313 里过半挤一簇,
+# 毫无意义)；0.68→265。且单问题簇占比始终 80-88% 不降——降阈值只让大簇越滚越大,
+# 不合并单问题簇。0.78 是最大簇还合理的甜点。单问题簇多是算法+高维固有特性,
+# 非阈值问题；要减单问题簇得换算法(LLM 语义合并/质心直径约束), 不是调这里。
 CLUSTER_SIMILARITY_THRESHOLD = float(os.environ.get("CLUSTER_SIMILARITY_THRESHOLD", "0.78"))
