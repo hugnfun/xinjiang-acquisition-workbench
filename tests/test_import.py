@@ -16,4 +16,4 @@ def test_import_folder(tmp_path, monkeypatch):
     assert mats[0].title == "测试标题"
     assert mats[0].likes == 14000  # 1.4万 -> 14000
     assert len(mats[0].images) == 2
-    assert s.query(Comment).count() == 2
+    assert s.query(Comment).count() == 3

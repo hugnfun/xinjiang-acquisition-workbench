@@ -13,7 +13,7 @@ def test_run_question_pool_job(tmp_path, monkeypatch):
     _setup(tmp_path, monkeypatch)
     # mock 5 阶段的 LLM 调用
     monkeypatch.setattr(qp.tc, "filter_questions", lambda comments: [
-        {"raw": c["raw"], "is_question": i % 2 == 0} for i, c in enumerate(comments)
+        {"raw": c["raw"], "is_question": True} for c in comments
     ])
     monkeypatch.setattr(qp.tc, "normalize_questions", lambda qs: [
         {"raw": q["raw"], "normalized": "最佳时间"} for q in qs
@@ -37,10 +37,11 @@ def test_run_question_pool_job(tmp_path, monkeypatch):
     assert job.status == "done"
     # 过滤后 is_question 的进 question 表
     qs = s2.query(Question).all()
-    assert len(qs) >= 1
-    # 聚类后有 cluster
+    assert len(qs) == 2
+    # 聚类后有 cluster：2 个相似问题合并成 1 簇（真正的 Stage-4 断言）
     clusters = s2.query(QuestionCluster).all()
-    assert len(clusters) >= 1
+    assert len(clusters) == 1
+    assert job.result_summary == {"questions": 2, "clusters": 1}
     # 每个 question 有 cluster_id
     assert all(q.cluster_id is not None for q in qs)
     # 簇有 name

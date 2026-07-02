@@ -1,5 +1,4 @@
 from datetime import datetime
-import numpy as np
 from sidecar.db.session import get_session
 from sidecar.db.models import (Comment, Question, QuestionCluster, ScrapeJob,
                                JobLog)
