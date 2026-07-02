@@ -29,6 +29,23 @@ def create_app() -> FastAPI:
     app.include_router(jobs.router)
     app.include_router(questions.router)
     app.include_router(synthesis.router)
+    # 启动时清理僵尸 job：sidecar 重启后，之前 running/queued 的 job 永远不会
+    # 完成（执行它们的进程已死），会把前端的"防重"逻辑卡死（按钮一直禁用）。
+    # 统一标记为 failed。
+    try:
+        from sidecar.db.session import get_session, init_db
+        from sidecar.db.models import ScrapeJob
+        init_db()
+        s = get_session()
+        zombies = s.query(ScrapeJob).filter(ScrapeJob.status.in_(["running", "queued"])).all()
+        for j in zombies:
+            j.status = "failed"
+            j.error = "僵尸任务清理：sidecar 重启时未正常结束"
+        if zombies:
+            s.commit()
+            print(f"[startup] 清理 {len(zombies)} 个僵尸 job", flush=True)
+    except Exception as e:
+        print(f"[startup] 僵尸清理失败（非致命）: {e}", flush=True)
     return app
 
 def main():
