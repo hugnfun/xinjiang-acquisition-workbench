@@ -14,9 +14,10 @@
 - ✅ **B2 问题池阈值**：在 313 条 embedding 上扫阈值，**结论是 0.78 不动**——降阈值触发链式合并（0.72 时 193/313 挤一簇）且单问题簇占比不降。config 加注释 + 测试锁住传递闭包行为。commit `eb4f409`。
 - ✅ **C1 长 job 改独立短 session**：`db/session.py` 加 `session_scope()`；question_pool/label/synthesis 三 job 重构，LLM 调用期间不持有 session，根治 /jobs 偶发卡死。`_log` 改独立短 session 立即 commit → 日志即时可见（修了 Stage1 期间 DB 看不到进度的监控盲区）。commit `c6cdfac`。
 - ✅ **C2 前端 MINOR 债**：Synthesis extract 加 catch + setTimeout 清理 + useEffect race-guard；Questions race-guard + rename 清空输入 + source_ref null 守卫。commit `5514abf`。
-- 🔄 **A1 抓取任务表单 UI + job**（spec §8 v0.3 项）：`sidecar/opencli/runner.py` 有 runner 未接 job/API/UI；需包 scrape job + `POST /jobs/scrape` + 表单。
-- 🔄 **A2 Flow C 增量聚类 + 周报**（spec §8 v0.3 项）：question_pool 支持 `mode=incremental`（新评论 embed→匹配现有簇/建新簇）+ 周报。
-- 测试：76/76 绿（`.venv/bin/python -m pytest -v`，**必须 `arch -arm64` 前缀**，见下）。
+- ✅ **A1 抓取任务表单 UI + job**（spec §8 v0.3 项）：`sidecar/importers/note_importer.py` 抽 `insert_note` 复用；`sidecar/jobs/scrape.py` search→download→入库（短 session、逐条防御）；`POST /jobs/scrape` + Jobs.tsx 表单。commit `479a8bc`。
+- ✅ **A2 Flow C 增量聚类 + 周报**（spec §8 v0.3 项）：`run_question_pool_incremental`（质心分配新问题到现有簇/建新簇，只命名新簇）+ `POST /jobs/question-pool {mode: incremental}`；`sidecar/jobs/report.py` MiniMax 周报 + `POST /jobs/report`；Jobs.tsx 两按钮。commit `783eea9`。
+- 测试：82/82 绿（`.venv/bin/python -m pytest -v`，**必须 `arch -arm64` 前缀**，见下）。tsc 干净。
+- **v0.3 收尾清单全部完成**，feat/module-A-v0.3 可合并 main（用户决定时机）。
 
 ## 关键架构点（踩坑必读）
 - **Claude Code 的 Bash 跑在 Rosetta x86_64**，但项目 `.venv` 的包是 arm64-only（`pydantic_core` 等编译扩展）。直接 `.venv/bin/python` 会 ImportError。**解法：`arch -arm64 .venv/bin/python ...`**（系统 python3.13 是 universal2，arch -arm64 强制 arm64 slice，包正常加载）。已存记忆 `run-arm64-venv-via-arch`。**装** pip 原生二进制仍须用户自己在 arm64 终端跑（`!` 前缀），Claude 代装会污染。
@@ -31,4 +32,4 @@
 - `.env`：`MINIMAX_API_KEY`(125 chars) / `MINIMAX_API_BASE=https://api.minimaxi.com/v1` / `MINIMAX_MODEL=MiniMax-M3` 已配好。
 
 ## 怎么继续（新会话第一句话）
-> 项目在 /Users/aicer/Documents/Project/xinjiang-acquisition-workbench，读 docs/HANDOFF.md。接着做 v0.3 的 A1（抓取 job）或 A2（增量聚类）。
+> 项目在 /Users/aicer/Documents/Project/xinjiang-acquisition-workbench，读 docs/HANDOFF.md。v0.3 收尾已完成（feat/module-A-v0.3，待合并 main）；下一步是真实使用产品攒数据解锁模块 B（≥80 条带标素材 + 发 30 篇内容收私信），或继续打磨 A（如合成库升级成完整笔记草稿、问题池单问题簇 LLM 语义合并）。
