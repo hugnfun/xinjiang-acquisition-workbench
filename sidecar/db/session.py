@@ -1,12 +1,9 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.pool import QueuePool
 from sidecar import config
 
 # 缓存 engine/sessionmaker，按 DB_PATH 字符串作 key 失效。
-# 原实现每次 get_session() 都 create_engine()+sessionmaker() —— 每请求一个
-# engine 的泄漏。这里改为进程内单一 engine + 单一 sessionmaker。
-# 测试会 monkeypatch sidecar.config.DB_PATH 到不同 tmp 路径，故当 DB_PATH
-# 变化时必须重建 engine（否则会复用到错误库的旧 engine）。
 _engine = None
 _cached_db_path = None
 _SessionLocal = None
@@ -18,13 +15,16 @@ def get_engine():
     config.ensure_dirs()
     current = str(config.DB_PATH)
     if _engine is None or _cached_db_path != current:
-        # check_same_thread=False：缓存后的单一 engine 会被 FastAPI 线程池
-        # 与打标后台线程（asyncio.to_thread）共享，必须放宽 pysqlite 的同线程
-        # 限制（SQLite 共享 engine 的标准写法）。原实现靠每请求新建 engine
-        # 在各自调用线程里规避了该问题；缓存后需显式放宽。
+        # 连接池加大 + 长超时：长 job（问题池/打标）在后台线程持有 session 较久，
+        # 同时 FastAPI 线程池的 HTTP 请求也要连接。默认 pool size 5+overflow 10
+        # 会被长 job 占满 → QueuePool 超时 → HTTP /jobs 卡死、job 也拿不到连接
+        # (sqlalchemy.exc.TimeoutError: QueuePool limit reached)。
+        # 加大到 20+50，超时 60s，给长 job 与 HTTP 共存留余量。
         _engine = create_engine(
             f"sqlite:///{config.DB_PATH}", echo=False,
-            connect_args={"check_same_thread": False},
+            connect_args={"check_same_thread": False, "timeout": 30},
+            poolclass=QueuePool,
+            pool_size=20, max_overflow=50, pool_timeout=60, pool_recycle=3600,
         )
         _cached_db_path = current
         _SessionLocal = sessionmaker(bind=_engine)
@@ -32,7 +32,7 @@ def get_engine():
 
 
 def get_session() -> Session:
-    get_engine()  # 确保缓存与当前 DB_PATH 一致（可能触发重建）
+    get_engine()
     return _SessionLocal()
 
 
