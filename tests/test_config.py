@@ -30,3 +30,31 @@ def test_vision_config_defaults(monkeypatch):
 def test_openai_importable():
     import openai
     assert openai.__version__
+
+def test_task_config_defaults(monkeypatch):
+    import importlib
+    monkeypatch.delenv("TASK_API_KEY", raising=False)
+    monkeypatch.delenv("TASK_MODEL", raising=False)
+    monkeypatch.delenv("TASK_API_BASE", raising=False)
+    importlib.reload(config)
+    assert config.TASK_MODEL == "qwen3.6:27b-q4_K_M"
+    assert config.TASK_API_BASE == "http://localhost:11434/v1"
+    assert config.TASK_API_KEY == "ollama"
+
+def test_embedding_config_defaults(monkeypatch):
+    import importlib
+    monkeypatch.delenv("EMBEDDING_MODEL", raising=False)
+    importlib.reload(config)
+    assert config.EMBEDDING_MODEL == "qwen3-embedding:latest"
+    assert config.EMBEDDING_API_BASE == "http://localhost:11434/v1"
+    assert config.EMBEDDING_API_KEY == "ollama"
+
+def test_cluster_threshold_default(monkeypatch):
+    import importlib
+    monkeypatch.delenv("CLUSTER_SIMILARITY_THRESHOLD", raising=False)
+    importlib.reload(config)
+    assert config.CLUSTER_SIMILARITY_THRESHOLD == 0.78
+
+def test_numpy_importable():
+    import numpy
+    assert numpy.__version__

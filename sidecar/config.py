@@ -25,3 +25,16 @@ VISION_API_KEY = os.environ.get("VISION_API_KEY", "ollama")
 # 视觉补标触发阈值：文本标签 confidence < 此值 → 看图补
 VISION_TRIGGER_CONFIDENCE = float(os.environ.get("VISION_TRIGGER_CONFIDENCE", "0.6"))
 VISION_MAX_IMAGES = int(os.environ.get("VISION_MAX_IMAGES", "1"))
+
+# ── 通用文本任务 provider（问题过滤/归一化/命名/合成提炼，默认本地 27b）──
+TASK_MODEL = os.environ.get("TASK_MODEL", "qwen3.6:27b-q4_K_M")
+TASK_API_BASE = os.environ.get("TASK_API_BASE", "http://localhost:11434/v1")
+TASK_API_KEY = os.environ.get("TASK_API_KEY", "ollama")
+
+# ── embedding（本地 qwen3-embedding）──
+EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "qwen3-embedding:latest")
+EMBEDDING_API_BASE = os.environ.get("EMBEDDING_API_BASE", "http://localhost:11434/v1")
+EMBEDDING_API_KEY = os.environ.get("EMBEDDING_API_KEY", "ollama")
+
+# ── 聚类：余弦相似度阈值，>此值连通成簇 ──
+CLUSTER_SIMILARITY_THRESHOLD = float(os.environ.get("CLUSTER_SIMILARITY_THRESHOLD", "0.78"))
