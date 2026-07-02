@@ -39,3 +39,25 @@ def test_run_synthesis_empty_materials_error(tmp_path, monkeypatch):
     import pytest
     with pytest.raises(ValueError, match="无素材"):
         sy.run_synthesis([], ["selling_point"])
+
+def test_run_synthesis_sets_job_status_done(tmp_path, monkeypatch):
+    """Covers the job_id→ScrapeJob.status path flagged in Task 6 review."""
+    _setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(sy.tc, "synthesize", lambda mats, types: {
+        "selling_points": ["纯玩无购物"],
+    })
+    from sidecar.db.session import get_session
+    from sidecar.db.models import Material, ScrapeJob
+    s = get_session()
+    m = s.query(Material).first()
+    job = ScrapeJob(type="synthesis", status="queued",
+                    params={"material_ids": [m.id], "types": ["selling_point"]})
+    s.add(job); s.commit(); s.refresh(job)
+
+    sy.run_synthesis([m.id], ["selling_point"], job_id=job.id)
+
+    s2 = get_session()
+    j = s2.query(ScrapeJob).get(job.id)
+    assert j.status == "done"
+    assert j.result_summary == {"written": 1, "types": ["selling_point"]}
+    assert j.finished_at is not None
