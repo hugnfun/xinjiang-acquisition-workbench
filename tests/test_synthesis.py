@@ -61,3 +61,19 @@ def test_run_synthesis_sets_job_status_done(tmp_path, monkeypatch):
     assert j.status == "done"
     assert j.result_summary == {"written": 1, "types": ["selling_point"]}
     assert j.finished_at is not None
+
+
+def test_synthesize_prompt_has_fewshot_and_anticliche():
+    """B1: prompt 必须带 few-shot 正反例 + 反套话约束，否则 MiniMax 必出套话。"""
+    from sidecar.llm.prompts.synthesis import synthesize_prompt
+    system, _ = synthesize_prompt(
+        [{"title": "赛里木湖攻略", "content": "7月去的湖水冰蓝", "tags": ["目的地:赛里木湖", "季节:7月"]}],
+        ["selling_point", "hook", "cta", "title"],
+    )
+    # few-shot 正反例都在
+    assert "正例" in system and "反例" in system
+    # 反套话约束在（禁用套话清单）
+    assert "禁用套话" in system and "五感治愈" in system
+    # 仍按 types 请求对应 JSON 键
+    assert "selling_points" in system and "hooks" in system
+    assert "ctas" in system and "titles" in system

@@ -33,6 +33,11 @@ def test_openai_importable():
 
 def test_task_config_defaults(monkeypatch):
     import importlib
+    # .env 的 MINIMAX_API_KEY 会经 app.py load_dotenv 进 os.environ 污染本测试
+    # （app-importing 测试收集时触发），使 TASK_MODEL 走 MiniMax 而非 27b 兜底。
+    # 测的是「无云端 key → 回退本地」分支，需一并清掉 MINIMAX_API_KEY。
+    monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     monkeypatch.delenv("TASK_API_KEY", raising=False)
     monkeypatch.delenv("TASK_MODEL", raising=False)
     monkeypatch.delenv("TASK_API_BASE", raising=False)

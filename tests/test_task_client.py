@@ -51,3 +51,36 @@ def test_synthesize_parses(monkeypatch):
     out = TC.synthesize([{"title":"t","content":"c","tags":["风景震撼"]}], ["selling_point","hook","cta","title"])
     assert out["selling_points"] == ["纯玩无购物","六年零差评"]
     assert out["hooks"] == ["人生必去一次"]
+
+
+def test_parse_obj_markdown_fenced():
+    """MiniMax 常把 JSON 包在 ```json 围栏里。"""
+    out = TC._parse_obj('```json\n{"name":"x","results":[{"a":1}]}\n```')
+    assert out == {"name": "x", "results": [{"a": 1}]}
+
+
+def test_parse_obj_reasoning_prefix():
+    """推理模型在 JSON 前输出思考（含花括号），不能把首尾 { } 误并。"""
+    raw = '让我想想。用户要卖点。注意 {"格式":"json"}。\n{"selling_points":["具体卖点"],"hooks":["钩子"]}'
+    out = TC._parse_obj(raw)
+    assert out["selling_points"] == ["具体卖点"]
+    assert out["hooks"] == ["钩子"]
+
+
+def test_parse_obj_stray_braces_then_json():
+    """思考里有多个花括号片段，仍能定位真正的 JSON 对象。"""
+    raw = '分析 {候选1} 和 {候选2} 后，输出如下：\n```json\n{"titles":["t1"]}\n```'
+    out = TC._parse_obj(raw)
+    assert out == {"titles": ["t1"]}
+
+
+def test_parse_obj_brace_inside_string():
+    """JSON 字符串值里含 {/}，不能破坏平衡计数。"""
+    out = TC._parse_obj('{"ctas":["点 {这里} 领取","扣1"]}')
+    assert out["ctas"] == ["点 {这里} 领取", "扣1"]
+
+
+def test_parse_obj_empty_and_garbage():
+    assert TC._parse_obj("") == {}
+    assert TC._parse_obj("   ") == {}
+    assert TC._parse_obj("没有json的东西") == {}
