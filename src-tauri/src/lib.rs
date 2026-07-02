@@ -6,6 +6,19 @@ use tauri::Manager;
 /// `Option` so the exit handler can `take()` it (kill+wait once, idempotent).
 struct SidecarChild(Mutex<Option<std::process::Child>>);
 
+/// The port the sidecar listens on. Frontend pulls it via `invoke("get_sidecar_port")`
+/// BEFORE its first fetch — more reliable than the `eval`-injection race (which
+/// fired in setup() before the webview's JS had loaded, leaving
+/// `window.__SIDECAR_PORT__` undefined and forcing the 8765 fallback → "Load failed").
+struct SidecarPort(u16);
+
+/// Tauri command: frontend calls this to learn which port the sidecar is on.
+/// Returns the port the Rust process bound and passed to the sidecar via --port.
+#[tauri::command]
+fn get_sidecar_port(state: tauri::State<SidecarPort>) -> u16 {
+    state.0
+}
+
 #[cfg(unix)]
 mod posix_signal {
     //! SIGTERM/SIGINT → kill the sidecar.
@@ -68,27 +81,14 @@ pub fn run(sidecar_port: u16, child: std::process::Child) {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(SidecarChild(Mutex::new(Some(child))))
-        .setup(move |app| {
-            // Inject the sidecar port into the frontend as a window global so the
-            // React api client (`src/api/client.ts`) can talk to the sidecar this
-            // Rust process spawned. The port is a free port we bound and passed to
-            // the sidecar via `--port`.
-            #[cfg(debug_assertions)]
-            {
-                if let Some(main_window) = app.get_webview_window("main") {
-                    let _ = main_window.eval(&format!(
-                        "window.__SIDECAR_PORT__ = {};",
-                        sidecar_port
-                    ));
-                }
-            }
-            #[cfg(not(debug_assertions))]
-            {
-                let _ = (app, sidecar_port);
-            }
+        .manage(SidecarPort(sidecar_port))
+        .setup(move |_app| {
+            // Port injection is now pull-based: the frontend invokes
+            // `get_sidecar_port` before its first fetch (see src/api/client.ts),
+            // which reads SidecarPort from app state. No eval race.
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![greet])
+        .invoke_handler(tauri::generate_handler![greet, get_sidecar_port])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 

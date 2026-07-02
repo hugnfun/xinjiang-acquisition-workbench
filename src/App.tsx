@@ -1,11 +1,15 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Materials from './routes/Materials';
 import Jobs from './routes/Jobs';
 import Questions from './routes/Questions';
 import Synthesis from './routes/Synthesis';
+import { api } from './api/client';
 
 export default function App() {
   const [tab, setTab] = useState<'materials' | 'questions' | 'jobs' | 'synthesis'>('materials');
+  // Resolve the sidecar port on mount (pull-based via get_sidecar_port Tauri
+  // command) so getImageUrl and all fetches hit the right port.
+  useEffect(() => { api.initPort(); }, []);
   return (
     <div style={{ fontFamily: 'system-ui' }}>
       <div style={{ borderBottom: '1px solid #eee', padding: '8px 16px' }}>
