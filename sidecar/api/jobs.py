@@ -5,8 +5,9 @@ from sidecar.db.session import get_session
 from sidecar.db.models import ScrapeJob, JobLog
 from sidecar.jobs.queue import submit
 from sidecar.jobs.label import run_label_job
-from sidecar.jobs.question_pool import run_question_pool_job
+from sidecar.jobs.question_pool import run_question_pool_job, run_question_pool_incremental
 from sidecar.jobs.scrape import run_scrape_job
+from sidecar.jobs.report import run_report_job
 
 router = APIRouter()
 
@@ -46,13 +47,30 @@ def trigger_label():
     submit(asyncio.to_thread(run_label_job, job.id))
     return {"job_id": job.id}
 
+class QuestionPoolIn(BaseModel):
+    mode: str = "full"  # full=全量冷启动 | incremental=只处理新评论
+
+
 @router.post("/jobs/question-pool")
-def trigger_question_pool():
+def trigger_question_pool(body: QuestionPoolIn | None = None):
+    mode = (body.mode if body else "full") or "full"
     s = get_session()
     from sidecar.db.models import ScrapeJob
-    job = ScrapeJob(type="question_pool", status="queued", params={})
+    job = ScrapeJob(type="question_pool", status="queued", params={"mode": mode})
     s.add(job); s.commit(); s.refresh(job)
-    submit(asyncio.to_thread(run_question_pool_job, job.id))
+    if mode == "incremental":
+        submit(asyncio.to_thread(run_question_pool_incremental, job.id))
+    else:
+        submit(asyncio.to_thread(run_question_pool_job, job.id))
+    return {"job_id": job.id}
+
+
+@router.post("/jobs/report")
+def trigger_report():
+    s = get_session()
+    job = ScrapeJob(type="report", status="queued", params={})
+    s.add(job); s.commit(); s.refresh(job)
+    submit(asyncio.to_thread(run_report_job, job.id))
     return {"job_id": job.id}
 
 

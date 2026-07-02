@@ -1,4 +1,5 @@
 from datetime import datetime
+import numpy as np
 from sidecar.db.session import get_session, session_scope
 from sidecar.db.models import (Comment, Question, QuestionCluster, ScrapeJob,
                                JobLog)
@@ -136,6 +137,147 @@ def run_question_pool_job(job_id: int):
                                  "clusters": len(cluster_id_map)},
                  finished_at=datetime.utcnow())
         _log(job_id, f"完成：{len(questions_data)} 问题，{len(cluster_id_map)} 簇")
+    except Exception as e:
+        _set_job(job_id, status="failed", error=str(e), finished_at=datetime.utcnow())
+        _log(job_id, f"失败: {e}", "error")
+
+
+def _cosine(a: np.ndarray, b: np.ndarray) -> float:
+    """两向量的余弦相似度。"""
+    na, nb = np.linalg.norm(a), np.linalg.norm(b)
+    if na == 0 or nb == 0:
+        return 0.0
+    return float(np.dot(a, b) / (na * nb))
+
+
+def run_question_pool_incremental(job_id: int):
+    """增量更新问题池：只处理新评论，按质心分配到现有簇（sim>阈值）或建新簇。
+
+    与全量冷启动的区别：不重跑已有问题、不重聚类、只命名新建簇。质心=簇内问题
+    embedding 均值；新问题找最近质心，超阈值并入，否则新建。保留既有簇不动。
+    """
+    _set_job(job_id, status="running", started_at=datetime.utcnow())
+    _log(job_id, "开始增量更新问题池")
+    try:
+        threshold = config.CLUSTER_SIMILARITY_THRESHOLD
+        # 1. 现有簇质心 + 已处理 comment_id 集合 + 新评论
+        with session_scope() as s:
+            clusters = s.query(QuestionCluster).all()
+            centroids: dict[int, np.ndarray] = {}  # cluster_id -> 质心
+            for cl in clusters:
+                qs = s.query(Question).filter_by(cluster_id=cl.id).all()
+                if not qs:
+                    continue
+                vecs = np.array([np.frombuffer(q.embedding, dtype=np.float32) for q in qs])
+                centroids[cl.id] = vecs.mean(axis=0)
+            done = {str(r[0]) for r in s.query(Question.source_ref).all() if r[0] is not None}
+            new_comments = s.query(Comment).filter(Comment.is_reply == False).all()
+            comment_data = [(c.id, (c.text or "").strip()) for c in new_comments
+                            if str(c.id) not in done]
+        _log(job_id, f"增量：{len(comment_data)} 条新评论（已处理 {len(done)} 条）")
+        if not comment_data:
+            _set_job(job_id, status="done",
+                     result_summary={"new_questions": 0, "merged": 0, "new_clusters": 0},
+                     finished_at=datetime.utcnow())
+            _log(job_id, "无新评论，完成")
+            return
+
+        # 2. 过滤 + 归一化 + embedding（同全量，但只对新评论）
+        questions_data = []
+        for batch in _batched(comment_data, BATCH):
+            non_empty = [(cid, txt) for cid, txt in batch if txt]
+            payload = [{"raw": txt} for cid, txt in non_empty]
+            if not payload:
+                continue
+            try:
+                results = tc.filter_questions(payload)
+            except Exception as e:
+                _log(job_id, f"过滤批次失败: {e}", "error")
+                continue
+            for r, (cid, txt) in zip(results, non_empty):
+                if r.get("is_question"):
+                    questions_data.append({"raw": r.get("raw", txt), "comment_id": cid})
+        if not questions_data:
+            _set_job(job_id, status="done",
+                     result_summary={"new_questions": 0, "merged": 0, "new_clusters": 0},
+                     finished_at=datetime.utcnow())
+            _log(job_id, "新评论中无问题，完成")
+            return
+        for batch in _batched(questions_data, BATCH):
+            try:
+                normed = tc.normalize_questions([{"raw": q["raw"]} for q in batch])
+            except Exception as e:
+                _log(job_id, f"归一化批次失败: {e}", "error")
+                continue
+            for q, n in zip(batch, normed):
+                q["normalized"] = n.get("normalized", q["raw"])
+        for q in questions_data:
+            q.setdefault("normalized", q["raw"])
+        try:
+            mat = emb.embed_batch([q["normalized"] for q in questions_data])
+        except Exception as e:
+            _set_job(job_id, status="failed", error=f"embedding 失败: {e}",
+                     finished_at=datetime.utcnow())
+            _log(job_id, f"embedding 失败: {e}", "error")
+            return
+
+        # 3. 质心分配：新问题找最近质心，sim>阈值→并入；否则新建簇
+        merged = 0
+        new_cluster_ids: list[int] = []
+        with session_scope() as s:
+            for q, vec in zip(questions_data, mat):
+                best_cid, best_sim = None, -1.0
+                for cid, cent in centroids.items():
+                    sim = _cosine(vec, cent)
+                    if sim > best_sim:
+                        best_sim, best_cid = sim, cid
+                if best_cid is not None and best_sim > threshold:
+                    cid = best_cid
+                    merged += 1
+                else:
+                    cl = QuestionCluster(name="", description="", question_count=0)
+                    s.add(cl); s.flush()
+                    cid = cl.id
+                    centroids[cid] = vec  # 新簇质心=首个向量
+                    new_cluster_ids.append(cid)
+                s.add(Question(
+                    normalized_text=q["normalized"], raw_text=q["raw"],
+                    source_ref=q["comment_id"], source_type="comment",
+                    embedding=vec.tobytes(), cluster_id=cid,
+                ))
+        _log(job_id, f"增量分配完成：{len(questions_data)} 新问题，并入 {merged}，新建 {len(new_cluster_ids)} 簇")
+
+        # 4. 更新受影响簇计数
+        affected = set(new_cluster_ids) | {cid for cid in centroids}  # 简化：全部刷新
+        with session_scope() as s:
+            for cid in list(affected):
+                cl = s.query(QuestionCluster).get(cid)
+                if cl:
+                    cl.question_count = s.query(Question).filter_by(cluster_id=cid).count()
+
+        # 5. 只命名新建簇（既有簇名不动，省 MiniMax）
+        for cid in new_cluster_ids:
+            with session_scope() as s:
+                samples = [q.raw_text
+                           for q in s.query(Question).filter_by(cluster_id=cid).limit(5).all()]
+            if not samples:
+                continue
+            try:
+                named = tc.name_cluster(samples)
+            except Exception as e:
+                _log(job_id, f"簇 {cid} 命名失败: {e}", "error")
+                named = {"name": "", "description": ""}
+            with session_scope() as s:
+                cl = s.query(QuestionCluster).get(cid)
+                if cl:
+                    cl.name = named.get("name", "")
+                    cl.description = named.get("description", "")
+
+        _set_job(job_id, status="done",
+                 result_summary={"new_questions": len(questions_data),
+                                 "merged": merged, "new_clusters": len(new_cluster_ids)},
+                 finished_at=datetime.utcnow())
+        _log(job_id, f"完成：新增 {len(questions_data)} 问题，并入 {merged}，新建 {len(new_cluster_ids)} 簇")
     except Exception as e:
         _set_job(job_id, status="failed", error=str(e), finished_at=datetime.utcnow())
         _log(job_id, f"失败: {e}", "error")

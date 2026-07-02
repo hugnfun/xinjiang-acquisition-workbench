@@ -60,6 +60,9 @@ export const api = {
   getJob: (id: number) => get<any>(`/jobs/${id}`),
   triggerLabel: () => post<{ job_id: number }>(`/jobs/label`, {}),
   triggerQuestionPool: () => post<{ job_id: number }>(`/jobs/question-pool`, {}),
+  triggerQuestionPoolIncremental: () =>
+    post<{ job_id: number }>(`/jobs/question-pool`, { mode: 'incremental' }),
+  triggerReport: () => post<{ job_id: number }>(`/jobs/report`, {}),
   triggerScrape: (keyword: string, limit: number) =>
     post<{ job_id: number }>(`/jobs/scrape`, { keyword, limit }),
   confirmTag: (mid: number, tag_value_id: number, action: 'confirm' | 'reject') =>

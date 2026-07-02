@@ -11,7 +11,7 @@ interface JobDetail {
 
 export default function Jobs() {
   const [jobs, setJobs] = useState<JobView[]>([]);
-  const [busy, setBusy] = useState<'label' | 'question-pool' | 'scrape' | null>(null);
+  const [busy, setBusy] = useState<'label' | 'question-pool' | 'scrape' | 'incremental' | 'report' | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [detail, setDetail] = useState<Record<number, JobDetail>>({});
@@ -27,11 +27,13 @@ export default function Jobs() {
     return () => clearInterval(t);
   }, []);
 
-  const trigger = async (kind: 'label' | 'question-pool') => {
+  const trigger = async (kind: 'label' | 'question-pool' | 'incremental' | 'report') => {
     setBusy(kind); setErr(null);
     try {
       if (kind === 'label') await api.triggerLabel();
-      else await api.triggerQuestionPool();
+      else if (kind === 'question-pool') await api.triggerQuestionPool();
+      else if (kind === 'incremental') await api.triggerQuestionPoolIncremental();
+      else await api.triggerReport();
     } catch (e: any) {
       setErr(e?.message || String(e));
     } finally {
@@ -92,6 +94,14 @@ export default function Jobs() {
                style={{ marginRight: 8, width: 60 }} />
         <button onClick={triggerScrape} disabled={busy !== null || running || !scrapeKeyword.trim()}>
           {busy === 'scrape' ? '提交中...' : '▶ 抓取并入库'}
+        </button>
+      </div>
+      <div style={{ marginBottom: 8 }}>
+        <button onClick={() => trigger('incremental')} disabled={busy !== null || running} style={{ marginRight: 8 }}>
+          {busy === 'incremental' ? '提交中...' : '▶ 问题池增量更新（只处理新评论）'}
+        </button>
+        <button onClick={() => trigger('report')} disabled={busy !== null || running}>
+          {busy === 'report' ? '提交中...' : '📋 生成问题池周报'}
         </button>
       </div>
       {err && (
