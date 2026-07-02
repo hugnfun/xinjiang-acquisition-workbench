@@ -19,7 +19,10 @@ export default function Materials() {
     }
   };
 
-  useEffect(() => { loadList(); }, []);
+  useEffect(() => {
+    api.initPort();
+    loadList();
+  }, []);
 
   const open = async (id: number) => {
     setLoading(true);

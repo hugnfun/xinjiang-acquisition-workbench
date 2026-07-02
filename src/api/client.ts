@@ -1,8 +1,5 @@
 import type { MaterialSummary, MaterialDetail, TagDimensionView, JobView, ClusterView, QuestionView, AssetView } from '../types/models';
 
-// Are we running inside Tauri? (has the @tauri-apps/api invoke bridge.)
-const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__;
-
 // Cached sidecar port. Resolved once via the `get_sidecar_port` Tauri command
 // (pull-based — the frontend asks for the port before its first fetch), which
 // avoids the eval-injection race where setup() ran before the webview's JS
@@ -11,18 +8,18 @@ let _port: string | null = null;
 
 async function resolvePort(): Promise<string> {
   if (_port) return _port;
-  if (isTauri) {
-    try {
-      const { invoke } = await import('@tauri-apps/api/core');
-      const port = await invoke<number>('get_sidecar_port');
-      _port = String(port);
-      return _port;
-    } catch (e) {
-      // invoke failed (older Tauri w/o the command, or dev mode) → fall through
-      console.warn('get_sidecar_port invoke failed, falling back:', e);
-    }
+  // Try the Tauri invoke bridge directly (don't gate on a __TAURI_INTERNALS__
+  // sniff — the flag name varies across Tauri v2 builds, and a wrong sniff
+  // skips invoke entirely → 8765 fallback → "Load failed"). If we're not in
+  // Tauri, the dynamic import or invoke throws and we fall through.
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    const port = await invoke<number>('get_sidecar_port');
+    _port = String(Number(port));
+    return _port;
+  } catch {
+    // not in Tauri, or command missing → fall through to env/fallback
   }
-  // Non-Tauri / fallback: Vite env, then 8765.
   const env = (import.meta as any).env.VITE_SIDECAR_PORT;
   _port = env ? String(env) : '8765';
   return _port;

@@ -82,10 +82,19 @@ pub fn run(sidecar_port: u16, child: std::process::Child) {
         .plugin(tauri_plugin_opener::init())
         .manage(SidecarChild(Mutex::new(Some(child))))
         .manage(SidecarPort(sidecar_port))
-        .setup(move |_app| {
+        .setup(move |app| {
             // Port injection is now pull-based: the frontend invokes
             // `get_sidecar_port` before its first fetch (see src/api/client.ts),
             // which reads SidecarPort from app state. No eval race.
+            //
+            // Dev-only: auto-open WebView devtools so frontend console errors
+            // (fetch failures, invoke errors) are visible without a hotkey.
+            #[cfg(debug_assertions)]
+            {
+                if let Some(main_window) = app.get_webview_window("main") {
+                    main_window.open_devtools();
+                }
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![greet, get_sidecar_port])
