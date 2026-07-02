@@ -1,10 +1,12 @@
 import asyncio
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 from sidecar.db.session import get_session
 from sidecar.db.models import ScrapeJob, JobLog
 from sidecar.jobs.queue import submit
 from sidecar.jobs.label import run_label_job
 from sidecar.jobs.question_pool import run_question_pool_job
+from sidecar.jobs.scrape import run_scrape_job
 
 router = APIRouter()
 
@@ -51,4 +53,19 @@ def trigger_question_pool():
     job = ScrapeJob(type="question_pool", status="queued", params={})
     s.add(job); s.commit(); s.refresh(job)
     submit(asyncio.to_thread(run_question_pool_job, job.id))
+    return {"job_id": job.id}
+
+
+class ScrapeIn(BaseModel):
+    keyword: str
+    limit: int = 20
+
+
+@router.post("/jobs/scrape")
+def trigger_scrape(body: ScrapeIn):
+    s = get_session()
+    job = ScrapeJob(type="scrape", status="queued",
+                    params={"keyword": body.keyword, "limit": body.limit})
+    s.add(job); s.commit(); s.refresh(job)
+    submit(asyncio.to_thread(run_scrape_job, job.id, body.keyword, body.limit))
     return {"job_id": job.id}

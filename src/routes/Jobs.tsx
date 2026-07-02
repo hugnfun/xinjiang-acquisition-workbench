@@ -11,11 +11,13 @@ interface JobDetail {
 
 export default function Jobs() {
   const [jobs, setJobs] = useState<JobView[]>([]);
-  const [busy, setBusy] = useState<'label' | 'question-pool' | null>(null);
+  const [busy, setBusy] = useState<'label' | 'question-pool' | 'scrape' | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [detail, setDetail] = useState<Record<number, JobDetail>>({});
   const [detailErr, setDetailErr] = useState<string | null>(null);
+  const [scrapeKeyword, setScrapeKeyword] = useState('');
+  const [scrapeLimit, setScrapeLimit] = useState(20);
 
   const refresh = () =>
     api.getJobs().then(r => { setJobs(r); }).catch(e => setErr(e?.message || String(e)));
@@ -30,6 +32,19 @@ export default function Jobs() {
     try {
       if (kind === 'label') await api.triggerLabel();
       else await api.triggerQuestionPool();
+    } catch (e: any) {
+      setErr(e?.message || String(e));
+    } finally {
+      setBusy(null);
+    }
+    setTimeout(refresh, 500);
+  };
+
+  const triggerScrape = async () => {
+    if (!scrapeKeyword.trim()) { setErr('请输入抓取关键词'); return; }
+    setBusy('scrape'); setErr(null);
+    try {
+      await api.triggerScrape(scrapeKeyword.trim(), scrapeLimit);
     } catch (e: any) {
       setErr(e?.message || String(e));
     } finally {
@@ -66,6 +81,18 @@ export default function Jobs() {
         {running && (
           <span style={{ marginLeft: 12, color: '#996600' }}>⏳ 有任务运行中，请等待完成</span>
         )}
+      </div>
+      <div style={{ marginBottom: 8, padding: 8, background: '#f6f8fa' }}>
+        <span style={{ marginRight: 8 }}>🔍 关键词抓取：</span>
+        <input value={scrapeKeyword} onChange={e => setScrapeKeyword(e.target.value)}
+               placeholder="如 新疆旅游" style={{ marginRight: 8, width: 160 }} />
+        <span style={{ marginRight: 4 }}>上限</span>
+        <input type="number" value={scrapeLimit} min={1} max={100}
+               onChange={e => setScrapeLimit(Math.max(1, Number(e.target.value) || 20))}
+               style={{ marginRight: 8, width: 60 }} />
+        <button onClick={triggerScrape} disabled={busy !== null || running || !scrapeKeyword.trim()}>
+          {busy === 'scrape' ? '提交中...' : '▶ 抓取并入库'}
+        </button>
       </div>
       {err && (
         <div style={{ marginTop: 8, padding: 8, color: '#b00020', background: '#fdecea' }}>
