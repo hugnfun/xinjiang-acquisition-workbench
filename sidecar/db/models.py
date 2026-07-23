@@ -1,5 +1,8 @@
 from datetime import datetime
-from sqlalchemy import String, Integer, Float, Boolean, Text, DateTime, ForeignKey, JSON
+from sqlalchemy import (
+    String, Integer, Float, Boolean, Text, DateTime, ForeignKey, JSON,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 class Base(DeclarativeBase):
@@ -7,6 +10,9 @@ class Base(DeclarativeBase):
 
 class Material(Base):
     __tablename__ = "material"
+    __table_args__ = (
+        UniqueConstraint("platform", "note_id", name="uq_material_platform_note_id"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     platform: Mapped[str] = mapped_column(String(32), default="xiaohongshu")
     note_id: Mapped[str] = mapped_column(String(64), index=True)
@@ -27,6 +33,9 @@ class Material(Base):
 
 class MaterialImage(Base):
     __tablename__ = "material_image"
+    __table_args__ = (
+        UniqueConstraint("material_id", "idx", name="uq_material_image_position"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     material_id: Mapped[int] = mapped_column(ForeignKey("material.id"))
     idx: Mapped[int] = mapped_column(Integer)
@@ -36,6 +45,9 @@ class MaterialImage(Base):
 
 class Comment(Base):
     __tablename__ = "comment"
+    __table_args__ = (
+        UniqueConstraint("material_id", "rank", name="uq_comment_material_rank"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     material_id: Mapped[int] = mapped_column(ForeignKey("material.id"), index=True)
     rank: Mapped[int] = mapped_column(Integer)
@@ -47,16 +59,24 @@ class Comment(Base):
     time: Mapped[str | None] = mapped_column(String(64), nullable=True)
     is_reply: Mapped[bool] = mapped_column(Boolean, default=False)
     reply_to: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # 问题池增量处理游标：pending | question | not_question | excluded
+    question_status: Mapped[str] = mapped_column(String(16), default="pending")
+    question_processed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 class TagDimension(Base):
     __tablename__ = "tag_dimension"
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(64), unique=True)
     description: Mapped[str] = mapped_column(Text, default="")
-    values: Mapped[list["TagValue"]] = relationship(back_populates="dimension", cascade="all,delete")
+    values: Mapped[list["TagValue"]] = relationship(
+        back_populates="dimension", cascade="all,delete", order_by="TagValue.id"
+    )
 
 class TagValue(Base):
     __tablename__ = "tag_value"
+    __table_args__ = (
+        UniqueConstraint("dimension_id", "value", name="uq_tag_value_dimension_value"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     dimension_id: Mapped[int] = mapped_column(ForeignKey("tag_dimension.id"))
     value: Mapped[str] = mapped_column(String(64))
@@ -68,6 +88,9 @@ class TagValue(Base):
 
 class MaterialTag(Base):
     __tablename__ = "material_tag"
+    __table_args__ = (
+        UniqueConstraint("material_id", "tag_value_id", name="uq_material_tag_pair"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     material_id: Mapped[int] = mapped_column(ForeignKey("material.id"))
     tag_value_id: Mapped[int] = mapped_column(ForeignKey("tag_value.id"))
@@ -102,6 +125,7 @@ class ScrapeJob(Base):
     # spec §5.5 进度条：已处理 / 总数
     progress: Mapped[int] = mapped_column(Integer, default=0)
     progress_total: Mapped[int] = mapped_column(Integer, default=0)
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
 
 class JobLog(Base):
     __tablename__ = "job_log"

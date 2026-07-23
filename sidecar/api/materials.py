@@ -1,8 +1,9 @@
 from datetime import datetime
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from sidecar.db.session import get_session
+from sqlalchemy.orm import Session
+from sidecar.db.session import get_db
 from sidecar.db.models import Material, MaterialTag, TagValue, TagDimension, TagSuggestion
 from sidecar import config
 
@@ -13,9 +14,9 @@ router = APIRouter()
 def list_materials(
     limit: int = 50, offset: int = 0, order: str = "likes",
     search: str | None = None, tag_value_id: int | None = None,
+    s: Session = Depends(get_db),
 ):
     # spec §5.1 顶栏：搜索框 · 标签多维筛选器 · 排序（点赞/收藏/最新）
-    s = get_session()
     q = s.query(Material)
     if search:
         kw = f"%{search.strip()}%"
@@ -66,8 +67,7 @@ def _tag_view(s, mt):
 
 
 @router.get("/materials/{mid}")
-def get_material(mid: int):
-    s = get_session()
+def get_material(mid: int, s: Session = Depends(get_db)):
     m = s.query(Material).get(mid)
     if not m:
         raise HTTPException(404)
@@ -99,8 +99,7 @@ class BatchTagIn(BaseModel):
 
 
 @router.post("/materials/batch/tags")
-def batch_tag(body: BatchTagIn):
-    s = get_session()
+def batch_tag(body: BatchTagIn, s: Session = Depends(get_db)):
     added = 0
     for mid in body.material_ids:
         exists = s.query(MaterialTag).filter_by(
@@ -125,8 +124,9 @@ class TagActionIn(BaseModel):
 
 
 @router.post("/materials/{mid}/tags")
-def manage_material_tag(mid: int, body: TagActionIn):
-    s = get_session()
+def manage_material_tag(
+    mid: int, body: TagActionIn, s: Session = Depends(get_db)
+):
     mt = s.query(MaterialTag).filter_by(material_id=mid, tag_value_id=body.tag_value_id).first()
     if body.action == "confirm":
         if mt:

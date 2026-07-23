@@ -1,6 +1,7 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sidecar.db.session import get_session
+from sqlalchemy.orm import Session
+from sidecar.db.session import get_db
 from sidecar.db.models import Asset, ScrapeJob
 from sidecar.jobs.queue import submit
 from sidecar.jobs.synthesis import run_synthesis
@@ -13,8 +14,7 @@ class ExtractIn(BaseModel):
     types: list[str]
 
 @router.post("/synthesis/extract")
-def extract(body: ExtractIn):
-    s = get_session()
+def extract(body: ExtractIn, s: Session = Depends(get_db)):
     job = ScrapeJob(type="synthesis", status="queued", params={"material_ids": body.material_ids, "types": body.types})
     s.add(job); s.commit(); s.refresh(job)
     def _run():
@@ -23,8 +23,10 @@ def extract(body: ExtractIn):
     return {"job_id": job.id}
 
 @router.get("/assets")
-def list_assets(type: str | None = None, include_disliked: bool = False):
-    s = get_session()
+def list_assets(
+    type: str | None = None, include_disliked: bool = False,
+    s: Session = Depends(get_db),
+):
     q = s.query(Asset)
     if type:
         q = q.filter_by(type=type)
@@ -39,8 +41,9 @@ class AssetUpdateIn(BaseModel):
     disliked: bool | None = None
 
 @router.put("/assets/{aid}")
-def update_asset(aid: int, body: AssetUpdateIn):
-    s = get_session()
+def update_asset(
+    aid: int, body: AssetUpdateIn, s: Session = Depends(get_db)
+):
     a = s.query(Asset).get(aid)
     if not a:
         raise HTTPException(404)
@@ -52,8 +55,7 @@ def update_asset(aid: int, body: AssetUpdateIn):
     return {"ok": True}
 
 @router.delete("/assets/{aid}")
-def delete_asset(aid: int):
-    s = get_session()
+def delete_asset(aid: int, s: Session = Depends(get_db)):
     a = s.query(Asset).get(aid)
     if not a:
         raise HTTPException(404)

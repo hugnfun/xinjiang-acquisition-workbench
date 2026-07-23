@@ -1,7 +1,8 @@
 import asyncio
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sidecar.db.session import get_session
+from sqlalchemy.orm import Session
+from sidecar.db.session import get_db
 from sidecar.db.models import ScrapeJob, JobLog
 from sidecar.jobs.queue import submit
 from sidecar.jobs.label import run_label_job, run_relabel_job
@@ -13,8 +14,7 @@ router = APIRouter()
 
 
 @router.get("/jobs")
-def list_jobs(limit: int = 50):
-    s = get_session()
+def list_jobs(limit: int = 50, s: Session = Depends(get_db)):
     jobs = s.query(ScrapeJob).order_by(ScrapeJob.created_at.desc()).limit(limit).all()
     return [{
         "id": j.id, "type": j.type, "status": j.status,
@@ -27,8 +27,7 @@ def list_jobs(limit: int = 50):
 
 
 @router.get("/jobs/{jid}")
-def get_job(jid: int):
-    s = get_session()
+def get_job(jid: int, s: Session = Depends(get_db)):
     j = s.query(ScrapeJob).get(jid)
     if not j:
         raise HTTPException(404)
@@ -45,8 +44,7 @@ def get_job(jid: int):
 
 # spec §5.5 失败重试
 @router.post("/jobs/{jid}/retry")
-def retry_job(jid: int):
-    s = get_session()
+def retry_job(jid: int, s: Session = Depends(get_db)):
     j = s.query(ScrapeJob).get(jid)
     if not j:
         raise HTTPException(404)
@@ -87,8 +85,7 @@ def _dispatch(s, job: ScrapeJob):
 
 
 @router.post("/jobs/label")
-def trigger_label():
-    s = get_session()
+def trigger_label(s: Session = Depends(get_db)):
     job = ScrapeJob(type="label_batch", status="queued", params={})
     s.add(job); s.commit(); s.refresh(job)
     submit(asyncio.to_thread(run_label_job, job.id))
@@ -101,8 +98,7 @@ class RelabelIn(BaseModel):
 
 
 @router.post("/jobs/relabel")
-def trigger_relabel(body: RelabelIn):
-    s = get_session()
+def trigger_relabel(body: RelabelIn, s: Session = Depends(get_db)):
     job = ScrapeJob(type="relabel", status="queued",
                     params={"material_ids": body.material_ids})
     s.add(job); s.commit(); s.refresh(job)
@@ -115,9 +111,10 @@ class QuestionPoolIn(BaseModel):
 
 
 @router.post("/jobs/question-pool")
-def trigger_question_pool(body: QuestionPoolIn | None = None):
+def trigger_question_pool(
+    body: QuestionPoolIn | None = None, s: Session = Depends(get_db)
+):
     mode = (body.mode if body else "full") or "full"
-    s = get_session()
     job = ScrapeJob(type="question_pool", status="queued", params={"mode": mode})
     s.add(job); s.commit(); s.refresh(job)
     if mode == "incremental":
@@ -128,8 +125,7 @@ def trigger_question_pool(body: QuestionPoolIn | None = None):
 
 
 @router.post("/jobs/report")
-def trigger_report():
-    s = get_session()
+def trigger_report(s: Session = Depends(get_db)):
     job = ScrapeJob(type="report", status="queued", params={})
     s.add(job); s.commit(); s.refresh(job)
     submit(asyncio.to_thread(run_report_job, job.id))
@@ -145,8 +141,7 @@ class ScrapeIn(BaseModel):
 
 
 @router.post("/jobs/scrape")
-def trigger_scrape(body: ScrapeIn):
-    s = get_session()
+def trigger_scrape(body: ScrapeIn, s: Session = Depends(get_db)):
     mode = body.mode or "keyword"
     if mode == "note":
         if not body.url:

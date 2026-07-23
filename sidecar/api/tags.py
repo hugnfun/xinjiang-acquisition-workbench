@@ -1,16 +1,16 @@
 from datetime import datetime
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sidecar.db.session import get_session
+from sqlalchemy.orm import Session
+from sidecar.db.session import get_db
 from sidecar.db.models import TagDimension, TagValue, MaterialTag, TagSuggestion
 
 router = APIRouter()
 
 
 @router.get("/tags")
-def list_tags():
+def list_tags(s: Session = Depends(get_db)):
     # spec §5.2 右侧：标签值列表（带命中素材数 + alias 数）
-    s = get_session()
     out = []
     for d in s.query(TagDimension).all():
         values = []
@@ -29,8 +29,7 @@ def list_tags():
 
 
 @router.get("/tags/suggestions")
-def list_suggestions():
-    s = get_session()
+def list_suggestions(s: Session = Depends(get_db)):
     return [{
         "id": sg.id, "dimension_name": sg.dimension_name,
         "proposed_value": sg.proposed_value, "status": sg.status,
@@ -45,8 +44,9 @@ class SuggestionActionIn(BaseModel):
 
 
 @router.post("/tags/suggestions/{sid}")
-def act_suggestion(sid: int, body: SuggestionActionIn):
-    s = get_session()
+def act_suggestion(
+    sid: int, body: SuggestionActionIn, s: Session = Depends(get_db)
+):
     sg = s.query(TagSuggestion).get(sid)
     if not sg:
         raise HTTPException(404)
@@ -74,8 +74,7 @@ class MergeTagsIn(BaseModel):
 
 
 @router.post("/tags/merge")
-def merge_tags(body: MergeTagsIn):
-    s = get_session()
+def merge_tags(body: MergeTagsIn, s: Session = Depends(get_db)):
     src = s.query(TagValue).get(body.source_id)
     tgt = s.query(TagValue).get(body.target_id)
     if not src or not tgt:
@@ -108,8 +107,9 @@ class TagValueUpdateIn(BaseModel):
 
 
 @router.put("/tag-values/{vid}")
-def update_tag_value(vid: int, body: TagValueUpdateIn):
-    s = get_session()
+def update_tag_value(
+    vid: int, body: TagValueUpdateIn, s: Session = Depends(get_db)
+):
     tv = s.query(TagValue).get(vid)
     if not tv:
         raise HTTPException(404)
@@ -131,8 +131,7 @@ class CreateDimensionIn(BaseModel):
 
 
 @router.post("/tag-dimensions")
-def create_dimension(body: CreateDimensionIn):
-    s = get_session()
+def create_dimension(body: CreateDimensionIn, s: Session = Depends(get_db)):
     exists = s.query(TagDimension).filter_by(name=body.name.strip()).first()
     if exists:
         raise HTTPException(409, "dimension already exists")
@@ -149,8 +148,9 @@ class CreateTagValueIn(BaseModel):
 
 
 @router.post("/tag-dimensions/{did}/values")
-def create_tag_value(did: int, body: CreateTagValueIn):
-    s = get_session()
+def create_tag_value(
+    did: int, body: CreateTagValueIn, s: Session = Depends(get_db)
+):
     d = s.query(TagDimension).get(did)
     if not d:
         raise HTTPException(404)

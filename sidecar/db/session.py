@@ -1,5 +1,6 @@
 from contextlib import contextmanager
-from sqlalchemy import create_engine
+from pathlib import Path
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import QueuePool
 from sidecar import config
@@ -16,25 +17,43 @@ def get_engine():
     config.ensure_dirs()
     current = str(config.DB_PATH)
     if _engine is None or _cached_db_path != current:
-        # 连接池加大 + 长超时：长 job（问题池/打标）在后台线程持有 session 较久，
-        # 同时 FastAPI 线程池的 HTTP 请求也要连接。默认 pool size 5+overflow 10
-        # 会被长 job 占满 → QueuePool 超时 → HTTP /jobs 卡死、job 也拿不到连接
-        # (sqlalchemy.exc.TimeoutError: QueuePool limit reached)。
-        # 加大到 20+50，超时 60s，给长 job 与 HTTP 共存留余量。
+        if _engine is not None:
+            _engine.dispose()
         _engine = create_engine(
             f"sqlite:///{config.DB_PATH}", echo=False,
             connect_args={"check_same_thread": False, "timeout": 30},
             poolclass=QueuePool,
-            pool_size=20, max_overflow=50, pool_timeout=60, pool_recycle=3600,
+            pool_size=8, max_overflow=8, pool_timeout=30, pool_recycle=3600,
         )
+
+        @event.listens_for(_engine, "connect")
+        def _configure_sqlite(dbapi_connection, _connection_record):
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.execute("PRAGMA busy_timeout=30000")
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.close()
+
         _cached_db_path = current
-        _SessionLocal = sessionmaker(bind=_engine)
+        _SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False)
     return _engine
 
 
 def get_session() -> Session:
     get_engine()
     return _SessionLocal()
+
+
+def get_db():
+    """FastAPI 请求级 session：无论成功或异常都保证释放连接。"""
+    s = get_session()
+    try:
+        yield s
+    except Exception:
+        s.rollback()
+        raise
+    finally:
+        s.close()
 
 
 @contextmanager
@@ -61,3 +80,16 @@ def session_scope():
 def init_db():
     from sidecar.db import models  # noqa: F401
     models.Base.metadata.create_all(get_engine())
+    run_migrations()
+
+
+def run_migrations():
+    """把空库和历史 create_all 数据库统一升级到最新 Alembic 版本。"""
+    from alembic import command
+    from alembic.config import Config
+
+    ini_path = Path(__file__).resolve().parent.parent / "alembic.ini"
+    alembic_cfg = Config(str(ini_path))
+    with get_engine().begin() as connection:
+        alembic_cfg.attributes["connection"] = connection
+        command.upgrade(alembic_cfg, "head")

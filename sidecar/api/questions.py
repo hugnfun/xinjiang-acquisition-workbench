@@ -1,31 +1,31 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sidecar.db.session import get_session
+from sqlalchemy.orm import Session
+from sidecar.db.session import get_db
 from sidecar.db.models import Question, QuestionCluster
 
 router = APIRouter()
 
 
 @router.get("/questions/clusters")
-def list_clusters():
+def list_clusters(s: Session = Depends(get_db)):
     # spec §5.3 左：cluster 树（可多级），返回 parent_id 供前端构建树
-    s = get_session()
     return [{"id": c.id, "name": c.name, "description": c.description,
              "question_count": c.question_count, "parent_id": c.parent_id}
             for c in s.query(QuestionCluster).order_by(QuestionCluster.question_count.desc()).all()]
 
 
 @router.get("/clusters/{cid}/questions")
-def cluster_questions(cid: int):
-    s = get_session()
+def cluster_questions(cid: int, s: Session = Depends(get_db)):
     return [{"id": q.id, "normalized_text": q.normalized_text, "raw_text": q.raw_text,
              "source_ref": q.source_ref, "source_type": q.source_type}
             for q in s.query(Question).filter_by(cluster_id=cid).all()]
 
 
 @router.get("/questions")
-def list_questions(cluster_id: int | None = None):
-    s = get_session()
+def list_questions(
+    cluster_id: int | None = None, s: Session = Depends(get_db)
+):
     q = s.query(Question)
     if cluster_id:
         q = q.filter_by(cluster_id=cluster_id)
@@ -40,8 +40,7 @@ class RenameIn(BaseModel):
 
 
 @router.put("/clusters/{cid}")
-def rename_cluster(cid: int, body: RenameIn):
-    s = get_session()
+def rename_cluster(cid: int, body: RenameIn, s: Session = Depends(get_db)):
     c = s.query(QuestionCluster).get(cid)
     if not c:
         raise HTTPException(404)
@@ -53,10 +52,9 @@ def rename_cluster(cid: int, body: RenameIn):
 
 
 @router.delete("/clusters/{cid}")
-def delete_cluster(cid: int):
+def delete_cluster(cid: int, s: Session = Depends(get_db)):
     # 只允许删除空簇（question_count=0），避免误删有问题的簇。
     # 如果有子簇也一并拒绝——先处理子簇再删父簇。
-    s = get_session()
     c = s.query(QuestionCluster).get(cid)
     if not c:
         raise HTTPException(404)
@@ -79,8 +77,7 @@ class CreateClusterIn(BaseModel):
 
 
 @router.post("/clusters")
-def create_cluster(body: CreateClusterIn):
-    s = get_session()
+def create_cluster(body: CreateClusterIn, s: Session = Depends(get_db)):
     cl = QuestionCluster(name=body.name, description=body.description,
                           question_count=0, parent_id=body.parent_id)
     s.add(cl)
@@ -97,8 +94,7 @@ class MergeClustersIn(BaseModel):
 
 
 @router.post("/clusters/merge")
-def merge_clusters(body: MergeClustersIn):
-    s = get_session()
+def merge_clusters(body: MergeClustersIn, s: Session = Depends(get_db)):
     src = s.query(QuestionCluster).get(body.source_id)
     tgt = s.query(QuestionCluster).get(body.target_id)
     if not src or not tgt:
@@ -121,8 +117,9 @@ class SplitClusterIn(BaseModel):
 
 
 @router.post("/clusters/{cid}/split")
-def split_cluster(cid: int, body: SplitClusterIn):
-    s = get_session()
+def split_cluster(
+    cid: int, body: SplitClusterIn, s: Session = Depends(get_db)
+):
     parent = s.query(QuestionCluster).get(cid)
     if not parent:
         raise HTTPException(404)
@@ -149,8 +146,9 @@ class MoveClusterIn(BaseModel):
 
 
 @router.put("/clusters/{cid}/move")
-def move_cluster(cid: int, body: MoveClusterIn):
-    s = get_session()
+def move_cluster(
+    cid: int, body: MoveClusterIn, s: Session = Depends(get_db)
+):
     cl = s.query(QuestionCluster).get(cid)
     if not cl:
         raise HTTPException(404)
@@ -167,8 +165,9 @@ class RewriteQuestionIn(BaseModel):
 
 
 @router.put("/questions/{qid}")
-def rewrite_question(qid: int, body: RewriteQuestionIn):
-    s = get_session()
+def rewrite_question(
+    qid: int, body: RewriteQuestionIn, s: Session = Depends(get_db)
+):
     q = s.query(Question).get(qid)
     if not q:
         raise HTTPException(404)
@@ -183,8 +182,9 @@ class MoveQuestionIn(BaseModel):
 
 
 @router.put("/questions/{qid}/move")
-def move_question(qid: int, body: MoveQuestionIn):
-    s = get_session()
+def move_question(
+    qid: int, body: MoveQuestionIn, s: Session = Depends(get_db)
+):
     q = s.query(Question).get(qid)
     if not q:
         raise HTTPException(404)

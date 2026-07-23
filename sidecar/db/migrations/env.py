@@ -1,5 +1,7 @@
-import sys, os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from sidecar.db.models import Base
 target_metadata = Base.metadata
 
@@ -59,6 +61,17 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
+    supplied_connection = config.attributes.get("connection")
+    if supplied_connection is not None:
+        context.configure(
+            connection=supplied_connection,
+            target_metadata=target_metadata,
+            render_as_batch=True,
+        )
+        with context.begin_transaction():
+            context.run_migrations()
+        return
+
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
@@ -67,7 +80,8 @@ def run_migrations_online() -> None:
 
     with connectable.connect() as connection:
         context.configure(
-            connection=connection, target_metadata=target_metadata
+            connection=connection, target_metadata=target_metadata,
+            render_as_batch=True,
         )
 
         with context.begin_transaction():
