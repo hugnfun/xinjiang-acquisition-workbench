@@ -40,6 +40,7 @@ def get_job(jid: int, s: Session = Depends(get_db)):
         "params": j.params, "result_summary": j.result_summary, "error": j.error,
         "progress": j.progress, "progress_total": j.progress_total,
         "cancel_requested": j.cancel_requested,
+        "token_usage": j.token_usage if hasattr(j, 'token_usage') else {},
         "logs": [{"level": l.level, "message": l.message,
                   "created_at": l.created_at.isoformat() if l.created_at else None}
                  for l in logs],

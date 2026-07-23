@@ -46,6 +46,18 @@ export interface AssetView {
   id: number; type: string; text: string;
   derived_from: number[]; tags: string[]; disliked: boolean;
   status: string; quality: number | null; reject_reason: string | null;
+  cluster_id: number | null; target_audience: string | null;
+}
+export interface CoverageItem {
+  cluster_id: number; cluster_name: string;
+  question_count: number; asset_count: number; covered: boolean;
+  asset_types: string[];
+  assets: { id: number; type: string; text: string; status: string }[];
+}
+export interface CoverageResult {
+  total_clusters: number; covered_clusters: number; uncovered_clusters: number;
+  top_uncovered: CoverageItem[];
+  clusters: CoverageItem[];
 }
 
 export interface WorkVaultScanItem {

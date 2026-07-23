@@ -113,8 +113,9 @@ export const api = {
     get<AssetView[]>(`/assets${type ? '?type=' + type : ''}${type && status ? '&' : '?'}${status ? 'status=' + status : ''}`),
   listAssetsByStatus: (status: string) =>
     get<AssetView[]>(`/assets?status=${status}`),
-  updateAsset: (aid: number, body: { text?: string; disliked?: boolean; status?: string; quality?: number; reject_reason?: string }) =>
+  updateAsset: (aid: number, body: { text?: string; disliked?: boolean; status?: string; quality?: number; reject_reason?: string; cluster_id?: number; target_audience?: string }) =>
     put(`/assets/${aid}`, body),
+  getCoverage: () => get<import('../types/models').CoverageResult>('/coverage'),
   deleteAsset: async (aid: number) => {
     const r = await fetch(`${await baseUrl()}/assets/${aid}`, { method: 'DELETE' });
     if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);

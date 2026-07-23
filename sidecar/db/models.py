@@ -126,6 +126,8 @@ class ScrapeJob(Base):
     progress: Mapped[int] = mapped_column(Integer, default=0)
     progress_total: Mapped[int] = mapped_column(Integer, default=0)
     cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Sprint 3: token/cost 追踪
+    token_usage: Mapped[dict] = mapped_column(JSON, default=dict)
 
 class JobLog(Base):
     __tablename__ = "job_log"
@@ -175,4 +177,11 @@ class Asset(Base):
     status: Mapped[str] = mapped_column(String(16), default="pending")
     quality: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 人工评分 1-5
     reject_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Sprint 3: 关联问题簇 + 目标客群
+    cluster_id: Mapped[int | None] = mapped_column(ForeignKey("question_cluster.id"), nullable=True, index=True)
+    target_audience: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Sprint 3: token/cost 追踪
+    prompt_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    model_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    token_usage: Mapped[dict] = mapped_column(JSON, default=dict)  # {prompt_tokens, completion_tokens, total_tokens, cost}
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

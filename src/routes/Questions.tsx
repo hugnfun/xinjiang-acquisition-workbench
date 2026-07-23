@@ -20,6 +20,7 @@ function buildTree(clusters: ClusterView[]): ClusterNode[] {
 
 export default function Questions({ onNavigateToMaterial }: { onNavigateToMaterial?: (id: number) => void }) {
   const [clusters, setClusters] = useState<ClusterView[]>([]);
+  const [coverage, setCoverage] = useState<Record<number, number>>({});  // cluster_id -> asset_count
   const [selCid, setSelCid] = useState<number | null>(null);
   const [questions, setQuestions] = useState<QuestionView[]>([]);
   const [renaming, setRenaming] = useState("");
@@ -38,6 +39,11 @@ export default function Questions({ onNavigateToMaterial }: { onNavigateToMateri
 
   const refreshClusters = useCallback(() => {
     api.getClusters().then(setClusters).catch(e => setErr(e?.message || String(e)));
+    api.getCoverage().then(r => {
+      const m: Record<number, number> = {};
+      r.clusters.forEach(c => { m[c.cluster_id] = c.asset_count; });
+      setCoverage(m);
+    }).catch(() => {});
   }, []);
 
   useEffect(() => { refreshClusters(); }, [refreshClusters]);
@@ -137,6 +143,11 @@ export default function Questions({ onNavigateToMaterial }: { onNavigateToMateri
         )}
         <span style={{ fontWeight: selCid === node.id ? 600 : 400 }}>{node.name || "(未命名)"}</span>
         <span style={{ color: "#aaa", fontSize: 12 }}>{node.question_count}</span>
+        {coverage[node.id] != null && (
+          <span title={coverage[node.id] > 0 ? `${coverage[node.id]} 条合成物` : "无内容覆盖"}
+            style={{ marginLeft: "auto", width: 8, height: 8, borderRadius: "50%",
+              background: coverage[node.id] > 0 ? "#22c55e" : "#ef4444", flexShrink: 0 }} />
+        )}
       </div>
       {expanded.has(node.id) && node.children.map(c => renderNode(c, depth + 1))}
     </div>
@@ -160,6 +171,11 @@ export default function Questions({ onNavigateToMaterial }: { onNavigateToMateri
       <div style={{ flex: 1, overflow: "auto", padding: 16 }}>
         {selCluster ? (
           <>
+            <div style={{ marginBottom: 12, padding: 8, background: "#f0f7ff", borderRadius: 6, fontSize: 13 }}>
+              <strong>内容覆盖：</strong>
+              {Object.values(coverage).filter(v => v > 0).length} / {Object.keys(coverage).length} 簇已有合成物，
+              {Object.values(coverage).filter(v => v === 0).length} 簇待覆盖
+            </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
               <h2 style={{ margin: 0 }}>{selCluster.name || "(未命名)"}</h2>
               <input value={renaming} onChange={e => setRenaming(e.target.value)} placeholder="重命名" style={{ padding: "3px 6px", border: "1px solid #ccc", borderRadius: 3, width: 120 }} />

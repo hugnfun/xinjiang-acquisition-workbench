@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
-import type { AssetView } from "../types/models";
+import type { AssetView, ClusterView } from "../types/models";
 import { getSelectedMaterialIds, clearMaterialSelection, onSelectionChange } from "../App";
 
 const STATUS_LABELS: Record<string, string> = {
@@ -34,6 +34,7 @@ export default function Synthesis({ onNavigateToMaterial }: {
   const [editText, setEditText] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
+  const [clusters, setClusters] = useState<ClusterView[]>([]);
   const refreshTimer = useRef<number | null>(null);
   const tabRef = useRef(tab);
 
@@ -45,6 +46,7 @@ export default function Synthesis({ onNavigateToMaterial }: {
   }, [tab]);
 
   useEffect(() => {
+    api.getClusters().then(setClusters).catch(() => {});
     const unsub = onSelectionChange(() => setSelCount(getSelectedMaterialIds().length));
     setSelCount(getSelectedMaterialIds().length);
     return unsub;
@@ -161,6 +163,15 @@ export default function Synthesis({ onNavigateToMaterial }: {
             <select value={a.status} onChange={e => { api.updateAsset(a.id, { status: e.target.value }).then(refresh); }}
               style={{ fontSize: 12, padding: "1px 4px", border: "1px solid #ddd", borderRadius: 3 }}>
               {Object.entries(STATUS_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          </div>
+          {/* 问题簇关联 */}
+          <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 4 }}>
+            <span style={{ fontSize: 12, color: "#888" }}>关联问题簇:</span>
+            <select value={a.cluster_id ?? ""} onChange={e => { api.updateAsset(a.id, { cluster_id: e.target.value ? Number(e.target.value) : 0 }).then(refresh); }}
+              style={{ fontSize: 12, padding: "1px 4px", border: "1px solid #ddd", borderRadius: 3, maxWidth: 180 }}>
+              <option value="">未关联</option>
+              {clusters.map(c => <option key={c.id} value={c.id}>{c.name || `簇 #${c.id}`} ({c.question_count})</option>)}
             </select>
           </div>
           {/* 适用标签 chips (spec §5.4) */}
