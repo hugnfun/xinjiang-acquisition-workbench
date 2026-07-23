@@ -16,17 +16,23 @@ export interface MaterialDetail extends MaterialSummary {
   content: string; url: string; local_folder: string | null;
   images: { idx: number; path: string; type: string }[];
 }
+export interface TagValueView {
+  id: number; value: string; alias: string[];
+  status: string; hit_count: number;
+}
 export interface TagDimensionView {
   id: number; name: string; description: string;
-  values: { id: number; value: string; alias: string[]; status: string }[];
+  values: TagValueView[];
 }
 export interface JobView {
   id: number; type: string; status: string;
   created_at: string | null; started_at: string | null;
   finished_at: string | null; error: string | null;
+  progress: number; progress_total: number;
 }
 export interface ClusterView {
   id: number; name: string; description: string; question_count: number;
+  parent_id: number | null;
 }
 export interface QuestionView {
   id: number; normalized_text: string; raw_text: string;

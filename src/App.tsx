@@ -1,25 +1,77 @@
 import { useState, useEffect } from 'react';
 import Materials from './routes/Materials';
+import Tags from './routes/Tags';
 import Jobs from './routes/Jobs';
 import Questions from './routes/Questions';
 import Synthesis from './routes/Synthesis';
 import { api } from './api/client';
 
+type Tab = 'materials' | 'tags' | 'questions' | 'synthesis' | 'jobs';
+
+// spec §5.4: /materials 勾选的素材可在 /synthesis 批量提炼
+let _selectedMaterialIds: Set<number> = new Set();
+const _listeners: (() => void)[] = [];
+export function getSelectedMaterialIds(): number[] {
+  return [..._selectedMaterialIds];
+}
+export function toggleMaterialSelection(id: number) {
+  if (_selectedMaterialIds.has(id)) _selectedMaterialIds.delete(id);
+  else _selectedMaterialIds.add(id);
+  _listeners.forEach(fn => fn());
+}
+export function clearMaterialSelection() {
+  _selectedMaterialIds.clear();
+  _listeners.forEach(fn => fn());
+}
+export function onSelectionChange(fn: () => void) {
+  _listeners.push(fn);
+  return () => { const i = _listeners.indexOf(fn); if (i >= 0) _listeners.splice(i, 1); };
+}
+
+const TABS: { key: Tab; label: string }[] = [
+  { key: 'materials', label: '素材库' },
+  { key: 'tags', label: '标签体系' },
+  { key: 'questions', label: '问题池' },
+  { key: 'synthesis', label: '合成库' },
+  { key: 'jobs', label: '任务中心' },
+];
+
 export default function App() {
-  const [tab, setTab] = useState<'materials' | 'questions' | 'jobs' | 'synthesis'>('materials');
-  // Resolve the sidecar port on mount (pull-based via get_sidecar_port Tauri
-  // command) so getImageUrl and all fetches hit the right port.
+  const [tab, setTab] = useState<Tab>('materials');
   useEffect(() => { api.initPort(); }, []);
+
+  // spec §5.4: 来源素材链接点击跳 /materials/<id>
+  const [pendingMaterialId, setPendingMaterialId] = useState<number | null>(null);
+  const navigateToMaterial = (id: number) => {
+    setPendingMaterialId(id);
+    setTab('materials');
+  };
+
   return (
-    <div style={{ fontFamily: 'system-ui' }}>
-      <div style={{ borderBottom: '1px solid #eee', padding: '8px 16px' }}>
-        <strong style={{ marginRight: 24 }}>新疆定制游获客工作台</strong>
-        <button onClick={() => setTab('materials')} style={{ fontWeight: tab==='materials'?700:400 }}>素材库</button>
-        <button onClick={() => setTab('questions')} style={{ fontWeight: tab==='questions'?700:400, marginLeft: 8 }}>问题池</button>
-        <button onClick={() => setTab('jobs')} style={{ fontWeight: tab==='jobs'?700:400, marginLeft: 8 }}>任务中心</button>
-        <button onClick={() => setTab('synthesis')} style={{ fontWeight: tab==='synthesis'?700:400, marginLeft: 8 }}>合成库</button>
+    <div style={{ fontFamily: 'system-ui', height: '100vh', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ borderBottom: '1px solid #ddd', padding: '8px 16px', display: 'flex', alignItems: 'center', gap: 4 }}>
+        <strong style={{ marginRight: 24, fontSize: 15 }}>新疆定制游获客工作台</strong>
+        {TABS.map(t => (
+          <button key={t.key} onClick={() => setTab(t.key)}
+            style={{
+              padding: '4px 12px', border: 'none', borderRadius: 4, cursor: 'pointer',
+              background: tab === t.key ? '#2563eb' : 'transparent',
+              color: tab === t.key ? '#fff' : '#333',
+              fontWeight: tab === t.key ? 600 : 400, fontSize: 14,
+            }}>
+            {t.label}
+          </button>
+        ))}
       </div>
-      {tab === 'materials' ? <Materials /> : tab === 'questions' ? <Questions /> : tab === 'jobs' ? <Jobs /> : <Synthesis />}
+      <div style={{ flex: 1, overflow: 'hidden' }}>
+        {tab === 'materials' ? (
+          <Materials key={pendingMaterialId ?? 'm'} pendingMaterialId={pendingMaterialId}
+            onConsumed={() => setPendingMaterialId(null)} />
+        ) : tab === 'tags' ? <Tags /> :
+          tab === 'questions' ? <Questions /> :
+          tab === 'jobs' ? <Jobs /> :
+          <Synthesis onNavigateToMaterial={navigateToMaterial} />}
+      </div>
     </div>
   );
 }

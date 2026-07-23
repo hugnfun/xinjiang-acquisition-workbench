@@ -34,3 +34,6 @@ def comments(url: str, limit: int = 50, with_replies: bool = True):
 
 def download(url: str, output: str):
     return run_opencli(["xiaohongshu", "download", url, "--output", output, "-f", "json"], timeout=300)
+def user_notes(url: str):
+    # spec §5.5 抓某用户主页：列出用户发布的笔记
+    return run_opencli(["xiaohongshu", "user", url, "-f", "json"], timeout=180)

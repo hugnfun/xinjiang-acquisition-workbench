@@ -59,7 +59,7 @@ def _write_labels(material_id, material_title, labels):
     return added
 
 def run_label_job(job_id: int):
-    _set_job(job_id, status="running", started_at=datetime.utcnow())
+    _set_job(job_id, status="running", started_at=datetime.utcnow(), progress=0, progress_total=0)
     _log(job_id, "开始批量打标")
 
     # 短 session 读 taxonomy + 素材，提取标量；LLM 打标期间不持有 session
@@ -70,6 +70,7 @@ def run_label_job(job_id: int):
             "id": m.id, "title": m.title, "content": m.content,
             "images": [img.path for img in m.images[:3]],
         } for m in materials]
+    _set_job(job_id, progress_total=len(mat_data))
     labeled = 0
     failed = 0
     last_error = ""
@@ -85,6 +86,7 @@ def run_label_job(job_id: int):
                 continue
             _write_labels(md["id"], md["title"], labels)
             labeled += 1
+            _set_job(job_id, progress=labeled + failed)
             _log(job_id, f"素材 {md['id']} 完成 ({len(labels)} 标签)")
         total = len(mat_data)
         # 全部素材打标失败：暴露失败而非伪装成 done（避免 done+0 隐藏如 API_KEY 缺失）
@@ -100,6 +102,62 @@ def run_label_job(job_id: int):
                 summary["failed_count"] = failed
             _set_job(job_id, status="done", result_summary=summary, finished_at=datetime.utcnow())
             _log(job_id, f"完成，共 {labeled} 篇" + (f"，{failed} 篇失败" if failed else ""))
+    except Exception as e:
+        _set_job(job_id, status="failed", error=str(e), finished_at=datetime.utcnow())
+        _log(job_id, f"失败: {e}", "error")
+
+
+def run_relabel_job(job_id: int, material_ids: list[int]):
+    """spec §5.1 批量触发 AI 重打标：只对选中素材重新打标。
+
+    与全量打标的区别：先清掉选中素材的 ai_text/ai_vision 标签（保留 human 标签），
+    再重新调 LLM 打标。"""
+    _set_job(job_id, status="running", started_at=datetime.utcnow(), progress=0, progress_total=0)
+    _log(job_id, f"开始重打标：{len(material_ids)} 篇素材")
+    with session_scope() as s:
+        taxonomy = _taxonomy(s)
+        mats = []
+        for mid in material_ids:
+            m = s.query(Material).get(mid)
+            if not m:
+                continue
+            # 清掉 AI 标签（保留 human 标签）
+            ai_tags = s.query(MaterialTag).filter(
+                MaterialTag.material_id == mid,
+                MaterialTag.source.in_(["ai_text", "ai_vision"]),
+            ).all()
+            for mt in ai_tags:
+                s.delete(mt)
+            mats.append({
+                "id": m.id, "title": m.title, "content": m.content,
+                "images": [img.path for img in m.images[:3]],
+            })
+    _set_job(job_id, progress_total=len(mats))
+    labeled = 0
+    failed = 0
+    last_error = ""
+    try:
+        for md in mats:
+            image_paths = [config.MEDIA_DIR / p for p in md["images"]]
+            try:
+                labels = label_material(md["title"], md["content"], image_paths, taxonomy)
+            except Exception as e:
+                failed += 1
+                last_error = str(e)
+                _log(job_id, f"素材 {md['id']} 重打标失败: {e}", "error")
+                continue
+            _write_labels(md["id"], md["title"], labels)
+            labeled += 1
+            _set_job(job_id, progress=labeled + failed)
+            _log(job_id, f"素材 {md['id']} 重打标完成 ({len(labels)} 标签)")
+        if labeled == 0 and failed > 0:
+            _set_job(job_id, status="failed", error=f"全部 {len(mats)} 篇重打标失败: {last_error}",
+                     result_summary={"labeled": 0, "total": len(mats)}, finished_at=datetime.utcnow())
+        else:
+            _set_job(job_id, status="done",
+                     result_summary={"labeled": labeled, "total": len(mats)},
+                     finished_at=datetime.utcnow())
+            _log(job_id, f"完成，共 {labeled} 篇重打标")
     except Exception as e:
         _set_job(job_id, status="failed", error=str(e), finished_at=datetime.utcnow())
         _log(job_id, f"失败: {e}", "error")

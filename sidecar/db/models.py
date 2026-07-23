@@ -99,6 +99,9 @@ class ScrapeJob(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    # spec §5.5 进度条：已处理 / 总数
+    progress: Mapped[int] = mapped_column(Integer, default=0)
+    progress_total: Mapped[int] = mapped_column(Integer, default=0)
 
 class JobLog(Base):
     __tablename__ = "job_log"
@@ -116,6 +119,8 @@ class QuestionCluster(Base):
     name: Mapped[str] = mapped_column(String(64), default="")
     description: Mapped[str] = mapped_column(Text, default="")
     question_count: Mapped[int] = mapped_column(Integer, default=0)
+    # spec §5.3 cluster 树可多级：子簇挂到父簇下
+    parent_id: Mapped[int | None] = mapped_column(ForeignKey("question_cluster.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     questions: Mapped[list["Question"]] = relationship(back_populates="cluster")
 

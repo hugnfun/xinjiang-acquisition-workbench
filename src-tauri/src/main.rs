@@ -10,6 +10,19 @@ use std::process::{Command, Stdio};
 /// exists (the caller then falls back to `current_dir`).
 fn find_project_root() -> Option<PathBuf> {
     let mut candidates: Vec<PathBuf> = Vec::new();
+    // 环境变量优先（方便多机器/不同路径），其次硬编码本机路径（release .app
+    // 双击启动时 cwd 是 /，walk-up 找不到项目，需要兜底）
+    if let Ok(root) = std::env::var("WORKBENCH_PROJECT_ROOT") {
+        let p = PathBuf::from(&root);
+        if p.join(".venv/bin/python").exists() && p.join("sidecar").is_dir() {
+            return Some(p);
+        }
+    }
+    const FALLBACK: &str = "/Users/aicer/Documents/Project/xinjiang-acquisition-workbench";
+    let fallback = PathBuf::from(FALLBACK);
+    if fallback.join(".venv/bin/python").exists() && fallback.join("sidecar").is_dir() {
+        candidates.push(fallback);
+    }
     if let Ok(cwd) = std::env::current_dir() {
         candidates.push(cwd);
     }
