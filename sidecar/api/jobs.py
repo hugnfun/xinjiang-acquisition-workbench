@@ -10,6 +10,7 @@ from sidecar.jobs.question_pool import run_question_pool_job, run_question_pool_
 from sidecar.jobs.scrape import run_scrape_job, run_scrape_note_job, run_scrape_user_job
 from sidecar.jobs.report import run_report_job
 from sidecar.jobs.synthesis import run_synthesis
+from sidecar.jobs.work_vault import run_work_vault_import
 
 router = APIRouter()
 
@@ -87,6 +88,9 @@ def _dispatch(job: ScrapeJob):
             jid, run_synthesis, p.get("material_ids", []),
             p.get("types", []), jid,
         )
+    elif t == "work_vault_import":
+        submit(jid, run_work_vault_import, jid,
+               p.get("vault_dir", ""), p.get("filenames", []))
     elif t == "scrape":
         mode = p.get("mode", "keyword")
         if mode == "note":
