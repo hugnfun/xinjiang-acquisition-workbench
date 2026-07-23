@@ -102,6 +102,8 @@ export const api = {
     put(`/questions/${qid}`, { normalized_text }),
   moveQuestion: (qid: number, target_cluster_id: number) =>
     put(`/questions/${qid}/move`, { target_cluster_id }),
+  batchMoveQuestions: (question_ids: number[], target_cluster_id: number) =>
+    put<{ ok: boolean; moved: number }>(`/questions/batch-move`, { question_ids, target_cluster_id }),
 
   // ── 合成库 ──
   extractAssets: (material_ids: number[], types: string[]) =>

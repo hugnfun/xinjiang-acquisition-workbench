@@ -63,6 +63,44 @@ def test_run_synthesis_sets_job_status_done(tmp_path, monkeypatch):
     assert j.finished_at is not None
 
 
+def test_synthesis_uses_material_tags_not_titles(tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(sy.tc, "synthesize", lambda mats, types: {
+        "titles": ["新疆不绕路玩法"],
+    })
+    from sidecar.db.models import Asset, Material, MaterialTag, TagValue
+    from sidecar.db.session import get_session
+    s = get_session()
+    material = s.query(Material).first()
+    tag = s.query(TagValue).filter_by(value="风景震撼").one()
+    s.add(MaterialTag(
+        material_id=material.id, tag_value_id=tag.id, source="human",
+        confirmed_by_human=True,
+    ))
+    s.commit()
+    mid, title = material.id, material.title
+    s.close()
+    sy.run_synthesis([mid], ["title"])
+    s = get_session()
+    asset = s.query(Asset).filter_by(type="title").one()
+    assert "content_type:风景震撼" in asset.tags
+    assert title not in asset.tags
+    s.close()
+
+
+def test_synthesis_empty_result_is_error(tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(sy.tc, "synthesize", lambda mats, types: {"titles": []})
+    from sidecar.db.models import Material
+    from sidecar.db.session import get_session
+    import pytest
+    s = get_session()
+    mid = s.query(Material).first().id
+    s.close()
+    with pytest.raises(ValueError, match="没有返回"):
+        sy.run_synthesis([mid], ["title"])
+
+
 def test_synthesize_prompt_has_fewshot_and_anticliche():
     """B1: prompt 必须带 few-shot 正反例 + 反套话约束，否则 MiniMax 必出套话。"""
     from sidecar.llm.prompts.synthesis import synthesize_prompt

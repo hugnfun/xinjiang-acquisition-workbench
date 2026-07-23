@@ -119,6 +119,38 @@ def test_merge_tags(tmp_path, monkeypatch):
     s.close()
 
 
+def test_merge_tags_rejects_cross_dimension(tmp_path, monkeypatch):
+    client = _setup(tmp_path, monkeypatch)
+    s = get_session()
+    source = s.query(TagDimension).filter_by(name="content_type").one().values[0]
+    target = s.query(TagDimension).filter_by(name="season").one().values[0]
+    source_id, target_id = source.id, target.id
+    s.close()
+    r = client.post(
+        "/tags/merge", json={"source_id": source_id, "target_id": target_id}
+    )
+    assert r.status_code == 400
+
+
+def test_review_tag_suggestion(tmp_path, monkeypatch):
+    client = _setup(tmp_path, monkeypatch)
+    s = get_session()
+    suggestion = TagSuggestion(
+        dimension_name="content_type", proposed_value="实测新类型",
+        sample_context="样本", status="pending",
+    )
+    s.add(suggestion); s.commit()
+    sid = suggestion.id
+    s.close()
+    assert any(item["id"] == sid for item in client.get("/tags/suggestions").json())
+    r = client.post(f"/tags/suggestions/{sid}", json={"action": "accept"})
+    assert r.status_code == 200
+    s = get_session()
+    assert s.query(TagValue).filter_by(value="实测新类型").one()
+    assert s.get(TagSuggestion, sid).status == "accepted"
+    s.close()
+
+
 def test_rename_tag_value(tmp_path, monkeypatch):
     client = _setup(tmp_path, monkeypatch)
     s = get_session()
@@ -265,6 +297,47 @@ def test_move_question(tmp_path, monkeypatch):
     s = get_session()
     assert s.query(Question).get(qid).cluster_id == c_id
     s.close()
+
+
+def test_batch_move_questions_is_atomic(tmp_path, monkeypatch):
+    client = _setup(tmp_path, monkeypatch)
+    p_id, c_id = _seed_questions()
+    s = get_session()
+    qid = s.query(Question).filter_by(cluster_id=p_id).first().id
+    s.close()
+    bad = client.put(
+        "/questions/batch-move",
+        json={"question_ids": [qid, 999999], "target_cluster_id": c_id},
+    )
+    assert bad.status_code == 404
+    s = get_session()
+    assert s.get(Question, qid).cluster_id == p_id
+    s.close()
+    ok = client.put(
+        "/questions/batch-move",
+        json={"question_ids": [qid], "target_cluster_id": c_id},
+    )
+    assert ok.status_code == 200
+    assert ok.json()["moved"] == 1
+    s = get_session()
+    assert s.get(Question, qid).cluster_id == c_id
+    assert s.get(QuestionCluster, p_id).question_count == 0
+    assert s.get(QuestionCluster, c_id).question_count == 2
+    s.close()
+
+
+def test_cluster_tree_rejects_cycles(tmp_path, monkeypatch):
+    client = _setup(tmp_path, monkeypatch)
+    parent_id, child_id = _seed_questions()
+    moved = client.put(
+        f"/clusters/{parent_id}/move", json={"parent_id": child_id}
+    )
+    assert moved.status_code == 400
+    merged = client.post(
+        "/clusters/merge",
+        json={"source_id": parent_id, "target_id": child_id},
+    )
+    assert merged.status_code == 400
 
 
 def test_delete_empty_cluster(tmp_path, monkeypatch):
@@ -415,3 +488,21 @@ def test_full_question_pool_rejected_when_questions_exist(tmp_path, monkeypatch)
     s.close()
     r = client.post("/jobs/question-pool", json={"mode": "full"})
     assert r.status_code == 409
+
+
+def test_materials_offset_reaches_beyond_first_page(tmp_path, monkeypatch):
+    client = _setup(tmp_path, monkeypatch)
+    s = get_session()
+    for index in range(65):
+        s.add(Material(
+            platform="manual", note_id=f"page-{index}",
+            url=f"manual:{index}", title=f"分页素材 {index}", author="测试",
+            likes=index,
+        ))
+    s.commit()
+    s.close()
+    first = client.get("/materials?limit=30&offset=0").json()
+    third = client.get("/materials?limit=30&offset=60").json()
+    assert first["total"] >= 66
+    assert len(first["items"]) == 30
+    assert len(third["items"]) >= 6

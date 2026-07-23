@@ -7,6 +7,18 @@ from sidecar.db.models import Question, QuestionCluster
 router = APIRouter()
 
 
+def _is_descendant(s: Session, candidate_id: int, ancestor_id: int) -> bool:
+    """candidate 是否位于 ancestor 的子树里；同时防御历史循环数据。"""
+    seen = set()
+    current = s.get(QuestionCluster, candidate_id)
+    while current and current.id not in seen:
+        if current.parent_id == ancestor_id:
+            return True
+        seen.add(current.id)
+        current = s.get(QuestionCluster, current.parent_id) if current.parent_id else None
+    return False
+
+
 @router.get("/questions/clusters")
 def list_clusters(s: Session = Depends(get_db)):
     # spec §5.3 左：cluster 树（可多级），返回 parent_id 供前端构建树
@@ -78,6 +90,8 @@ class CreateClusterIn(BaseModel):
 
 @router.post("/clusters")
 def create_cluster(body: CreateClusterIn, s: Session = Depends(get_db)):
+    if body.parent_id is not None and not s.get(QuestionCluster, body.parent_id):
+        raise HTTPException(404, "parent cluster not found")
     cl = QuestionCluster(name=body.name, description=body.description,
                           question_count=0, parent_id=body.parent_id)
     s.add(cl)
@@ -101,10 +115,16 @@ def merge_clusters(body: MergeClustersIn, s: Session = Depends(get_db)):
         raise HTTPException(404, "source or target cluster not found")
     if src.id == tgt.id:
         raise HTTPException(400, "cannot merge into itself")
+    if _is_descendant(s, tgt.id, src.id):
+        raise HTTPException(400, "cannot merge a cluster into its descendant")
     # 把所有问题从 source 搬到 target
     for q in s.query(Question).filter_by(cluster_id=src.id).all():
         q.cluster_id = tgt.id
-    tgt.question_count += src.question_count
+    s.query(QuestionCluster).filter_by(parent_id=src.id).update(
+        {QuestionCluster.parent_id: tgt.id}, synchronize_session=False
+    )
+    s.flush()
+    tgt.question_count = s.query(Question).filter_by(cluster_id=tgt.id).count()
     src.question_count = 0
     s.commit()
     return {"ok": True, "merged_into": tgt.id}
@@ -154,6 +174,12 @@ def move_cluster(
         raise HTTPException(404)
     if body.parent_id == cid:
         raise HTTPException(400, "cannot be own parent")
+    if body.parent_id is not None:
+        parent = s.get(QuestionCluster, body.parent_id)
+        if not parent:
+            raise HTTPException(404, "parent cluster not found")
+        if _is_descendant(s, parent.id, cl.id):
+            raise HTTPException(400, "cannot move a cluster under its descendant")
     cl.parent_id = body.parent_id
     s.commit()
     return {"ok": True}
@@ -162,6 +188,38 @@ def move_cluster(
 # spec §5.3 顶部：改写归一化单条问题
 class RewriteQuestionIn(BaseModel):
     normalized_text: str
+
+
+class BatchMoveQuestionsIn(BaseModel):
+    question_ids: list[int]
+    target_cluster_id: int
+
+
+@router.put("/questions/batch-move")
+def batch_move_questions(
+    body: BatchMoveQuestionsIn, s: Session = Depends(get_db)
+):
+    question_ids = list(dict.fromkeys(body.question_ids))
+    if not question_ids:
+        raise HTTPException(400, "question_ids cannot be empty")
+    target = s.get(QuestionCluster, body.target_cluster_id)
+    if not target:
+        raise HTTPException(404, "target cluster not found")
+    questions = s.query(Question).filter(Question.id.in_(question_ids)).all()
+    if len(questions) != len(question_ids):
+        raise HTTPException(404, "one or more questions not found")
+    old_cluster_ids = {q.cluster_id for q in questions if q.cluster_id}
+    for question in questions:
+        question.cluster_id = target.id
+    s.flush()
+    for cluster_id in old_cluster_ids | {target.id}:
+        cluster = s.get(QuestionCluster, cluster_id)
+        if cluster:
+            cluster.question_count = s.query(Question).filter_by(
+                cluster_id=cluster_id
+            ).count()
+    s.commit()
+    return {"ok": True, "moved": len(questions)}
 
 
 @router.put("/questions/{qid}")
@@ -189,14 +247,18 @@ def move_question(
     if not q:
         raise HTTPException(404)
     old_cid = q.cluster_id
+    target = s.get(QuestionCluster, body.target_cluster_id)
+    if not target:
+        raise HTTPException(404, "target cluster not found")
     q.cluster_id = body.target_cluster_id
+    s.flush()
     # 更新计数
     if old_cid:
         old = s.query(QuestionCluster).get(old_cid)
         if old:
             old.question_count = s.query(Question).filter_by(cluster_id=old_cid).count()
-    tgt = s.query(QuestionCluster).get(body.target_cluster_id)
-    if tgt:
-        tgt.question_count = s.query(Question).filter_by(cluster_id=body.target_cluster_id).count()
+    target.question_count = s.query(Question).filter_by(
+        cluster_id=body.target_cluster_id
+    ).count()
     s.commit()
     return {"ok": True}

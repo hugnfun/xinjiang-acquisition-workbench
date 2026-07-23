@@ -19,9 +19,12 @@ export default function Synthesis({ onNavigateToMaterial }: {
   const [selCount, setSelCount] = useState(0);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editText, setEditText] = useState("");
+  const [notice, setNotice] = useState<string | null>(null);
   const refreshTimer = useRef<number | null>(null);
+  const tabRef = useRef(tab);
 
   useEffect(() => {
+    tabRef.current = tab;
     let active = true;
     api.listAssets(tab).then(list => { if (active) setAssets(list); });
     return () => { active = false; };
@@ -37,20 +40,43 @@ export default function Synthesis({ onNavigateToMaterial }: {
     if (refreshTimer.current) window.clearTimeout(refreshTimer.current);
   }, []);
 
-  const refresh = () => api.listAssets(tab).then(setAssets);
+  const refresh = () => api.listAssets(tabRef.current).then(setAssets);
+
+  const pollJob = (jobId: number, attempt = 0) => {
+    api.getJob(jobId).then(job => {
+      if (job.status === "done") {
+        setNotice(`提炼完成，新增 ${job.result_summary?.written ?? 0} 条`);
+        setBusy(false);
+        refresh();
+      } else if (job.status === "failed" || job.status === "cancelled") {
+        setNotice(job.status === "failed" ? `提炼失败：${job.error || "请到任务中心查看日志"}` : "提炼任务已取消");
+        setBusy(false);
+      } else if (attempt < 300) {
+        refreshTimer.current = window.setTimeout(() => pollJob(jobId, attempt + 1), 1000);
+      } else {
+        setNotice(`任务 #${jobId} 仍在运行，请到任务中心继续查看`);
+        setBusy(false);
+      }
+    }).catch(e => {
+      setNotice(`读取任务状态失败：${e?.message || String(e)}`);
+      setBusy(false);
+    });
+  };
 
   const extract = async () => {
     const ids = getSelectedMaterialIds();
     if (ids.length === 0) { alert("请先到「素材库」勾选素材（详情页点\"加入合成选区\"）"); return; }
     setBusy(true);
+    setNotice(null);
     try {
       const { job_id } = await api.extractAssets(ids, [tab]);
-      alert("提炼任务已提交 (job " + job_id + ")，稍后刷新查看");
+      setNotice(`提炼任务 #${job_id} 已排队`);
       if (refreshTimer.current) window.clearTimeout(refreshTimer.current);
-      refreshTimer.current = window.setTimeout(refresh, 3000);
+      pollJob(job_id);
     } catch (e) {
-      alert("提炼失败: " + e);
-    } finally { setBusy(false); }
+      setNotice("提炼失败: " + e);
+      setBusy(false);
+    }
   };
 
   const dislike = async (aid: number) => {
@@ -90,6 +116,7 @@ export default function Synthesis({ onNavigateToMaterial }: {
           {busy ? "提炼中…" : "让 AI 从选中素材里提炼新一批"}
         </button>
       </div>
+      {notice && <div style={{ marginBottom: 12, padding: 8, background: notice.includes("失败") ? "#fdecea" : "#e8f0fe", color: notice.includes("失败") ? "#b00020" : "#1a56db" }}>{notice}</div>}
       {assets.length === 0 && <p style={{ color: "#999" }}>暂无合成物。先到素材库选素材，再点提炼。</p>}
       {assets.map(a => (
         <div key={a.id} style={{ padding: 12, marginBottom: 8, borderBottom: "1px solid #eee" }}>

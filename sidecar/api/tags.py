@@ -52,17 +52,30 @@ def act_suggestion(
         raise HTTPException(404)
     if body.action == "accept":
         value = (body.rename or sg.proposed_value).strip()
+        if not value:
+            raise HTTPException(400, "tag value cannot be empty")
         d = s.query(TagDimension).filter_by(name=sg.dimension_name).first()
-        if d:
+        if not d:
+            raise HTTPException(400, f"dimension not found: {sg.dimension_name}")
+        exists = s.query(TagValue).filter_by(
+            dimension_id=d.id, value=value
+        ).first()
+        if not exists:
             s.add(TagValue(dimension_id=d.id, value=value, alias=[]))
         sg.status = "accepted"
     elif body.action == "merge" and body.merge_into_value_id:
         tv = s.query(TagValue).get(body.merge_into_value_id)
-        if tv:
+        if not tv:
+            raise HTTPException(404, "target tag value not found")
+        if tv.dimension.name != sg.dimension_name:
+            raise HTTPException(400, "suggestion and target must be in same dimension")
+        if sg.proposed_value not in tv.alias and sg.proposed_value != tv.value:
             tv.alias = [*tv.alias, sg.proposed_value]
         sg.status = "merged"
     elif body.action == "reject":
         sg.status = "rejected"
+    else:
+        raise HTTPException(400, "unknown suggestion action")
     s.commit()
     return {"ok": True}
 
@@ -81,6 +94,8 @@ def merge_tags(body: MergeTagsIn, s: Session = Depends(get_db)):
         raise HTTPException(404, "source or target tag value not found")
     if src.id == tgt.id:
         raise HTTPException(400, "cannot merge into itself")
+    if src.dimension_id != tgt.dimension_id:
+        raise HTTPException(400, "tags must be in the same dimension")
     # 把所有 material_tag 从 source 搬到 target，去重
     moved = 0
     for mt in s.query(MaterialTag).filter_by(tag_value_id=src.id).all():
@@ -92,7 +107,8 @@ def merge_tags(body: MergeTagsIn, s: Session = Depends(get_db)):
             mt.tag_value_id = tgt.id
             moved += 1
     # 旧名进 alias
-    tgt.alias = [*tgt.alias, src.value]
+    if src.value not in tgt.alias and src.value != tgt.value:
+        tgt.alias = [*tgt.alias, src.value]
     # 软弃用 source
     src.status = "deprecated"
     s.commit()
@@ -114,11 +130,23 @@ def update_tag_value(
     if not tv:
         raise HTTPException(404)
     if body.value is not None:
-        tv.value = body.value
+        value = body.value.strip()
+        if not value:
+            raise HTTPException(400, "tag value cannot be empty")
+        duplicate = s.query(TagValue).filter(
+            TagValue.dimension_id == tv.dimension_id,
+            TagValue.value == value,
+            TagValue.id != tv.id,
+        ).first()
+        if duplicate:
+            raise HTTPException(409, "tag value already exists")
+        tv.value = value
     if body.add_alias:
         if body.add_alias not in tv.alias:
             tv.alias = [*tv.alias, body.add_alias]
     if body.status:
+        if body.status not in ("active", "deprecated"):
+            raise HTTPException(400, "status must be active or deprecated")
         tv.status = body.status
     s.commit()
     return {"ok": True}

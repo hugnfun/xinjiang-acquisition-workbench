@@ -49,6 +49,9 @@ def run_synthesis(material_ids: list[int], types: list[str], job_id: int | None 
     if job_id and cancellation_checkpoint(job_id):
         return 0
     written = 0
+    asset_tags = sorted({
+        tag for material in mats for tag in material.get("tags", [])
+    })[:12]
     with session_scope() as s:
         for t in types:
             key = TYPE_KEY.get(t)
@@ -60,10 +63,12 @@ def run_synthesis(material_ids: list[int], types: list[str], job_id: int | None 
                 s.add(Asset(
                     type=t, text=text.strip(),
                     derived_from=list(material_ids),
-                    tags=[m["title"][:20] for m in mats[:3]],
+                    tags=asset_tags,
                     disliked=False,
                 ))
                 written += 1
+    if written == 0:
+        raise ValueError("模型没有返回所选类型的有效合成内容")
     if job_id:
         with session_scope() as s:
             job = s.query(ScrapeJob).get(job_id)

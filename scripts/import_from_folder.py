@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from sidecar.db.session import init_db, get_session
+from sidecar.db.session import init_db, session_scope
 from sidecar.importers.note_importer import insert_note
 
 
@@ -13,13 +13,12 @@ def import_folder(source_dir: Path) -> int:
     source_dir = Path(source_dir)
     init_db()
     manifest = json.loads((source_dir / "_manifest.json").read_text(encoding="utf-8"))
-    s = get_session()
     count = 0
-    for item in manifest["items"]:
-        folder = source_dir / item["folder"]
-        if insert_note(s, folder, item):
-            count += 1
-    s.commit()
+    with session_scope() as s:
+        for item in manifest["items"]:
+            folder = source_dir / item["folder"]
+            if insert_note(s, folder, item):
+                count += 1
     return count
 
 

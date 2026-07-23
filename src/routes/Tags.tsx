@@ -2,8 +2,18 @@ import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import type { TagDimensionView } from "../types/models";
 
+interface TagSuggestionView {
+  id: number;
+  dimension_name: string;
+  proposed_value: string;
+  sample_context: string;
+  material_id: number | null;
+}
+
 export default function Tags() {
   const [dims, setDims] = useState<TagDimensionView[]>([]);
+  const [suggestions, setSuggestions] = useState<TagSuggestionView[]>([]);
+  const [suggestTargets, setSuggestTargets] = useState<Record<number, number>>({});
   const [selDimId, setSelDimId] = useState<number | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [newDimName, setNewDimName] = useState("");
@@ -16,11 +26,26 @@ export default function Tags() {
   const [mergeSrc, setMergeSrc] = useState<number | null>(null);
   const [mergeTgt, setMergeTgt] = useState<number | null>(null);
 
-  const refresh = () => api.getTags().then(setDims).catch(e => setErr(e?.message || String(e)));
+  const refresh = async () => {
+    try {
+      const [nextDims, nextSuggestions] = await Promise.all([
+        api.getTags(), api.getSuggestions(),
+      ]);
+      setDims(nextDims);
+      setSuggestions(nextSuggestions);
+      setErr(null);
+    } catch (e: any) {
+      setErr(e?.message || String(e));
+    }
+  };
   useEffect(() => { refresh(); }, []);
 
   const selDim = dims.find(d => d.id === selDimId);
-  const allValues = dims.flatMap(d => d.values.map(v => ({ ...v, dimName: d.name })));
+  const allValues = dims.flatMap(d => d.values.map(v => ({ ...v, dimName: d.name, dimId: d.id })));
+  const mergeSource = allValues.find(v => v.id === mergeSrc);
+  const mergeTargets = allValues.filter(
+    v => v.status === "active" && (!mergeSource || v.dimId === mergeSource.dimId)
+  );
 
   const createDim = async () => {
     if (!newDimName.trim()) return;
@@ -57,6 +82,18 @@ export default function Tags() {
     catch (e: any) { setErr(e?.message || String(e)); }
   };
 
+  const reviewSuggestion = async (
+    suggestion: TagSuggestionView, action: "accept" | "reject" | "merge"
+  ) => {
+    try {
+      await api.actSuggestion(
+        suggestion.id, action,
+        action === "merge" ? suggestTargets[suggestion.id] : undefined,
+      );
+      await refresh();
+    } catch (e: any) { setErr(e?.message || String(e)); }
+  };
+
   return (
     <div style={{ display: "flex", height: "100%" }}>
       <div style={{ width: 280, borderRight: "1px solid #eee", overflow: "auto", padding: 8 }}>
@@ -78,6 +115,28 @@ export default function Tags() {
       </div>
       <div style={{ flex: 1, overflow: "auto", padding: 16 }}>
         {err && <div style={{ color: "#b00020", background: "#fdecea", padding: 8, marginBottom: 8 }}>{err}</div>}
+        <div style={{ padding: 12, background: "#fff8e1", border: "1px solid #f2d98d", borderRadius: 6, marginBottom: 16 }}>
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>AI 待审标签建议（{suggestions.length}）</div>
+          {suggestions.length === 0 && <div style={{ color: "#777", fontSize: 13 }}>当前没有待审建议</div>}
+          {suggestions.map(suggestion => {
+            const targets = allValues.filter(
+              value => value.status === "active" && value.dimName === suggestion.dimension_name
+            );
+            return (
+              <div key={suggestion.id} style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", padding: "6px 0", borderTop: "1px solid #f3e4b3" }}>
+                <span style={{ fontSize: 13, minWidth: 180 }}>[{suggestion.dimension_name}] <strong>{suggestion.proposed_value}</strong></span>
+                <button onClick={() => reviewSuggestion(suggestion, "accept")} style={{ fontSize: 12, padding: "2px 8px", cursor: "pointer" }}>接受为新标签</button>
+                <select value={suggestTargets[suggestion.id] ?? ""} onChange={e => setSuggestTargets(prev => ({ ...prev, [suggestion.id]: Number(e.target.value) }))} style={{ padding: "2px 4px", maxWidth: 160 }}>
+                  <option value="">合并到现有标签…</option>
+                  {targets.map(value => <option key={value.id} value={value.id}>{value.value}</option>)}
+                </select>
+                <button disabled={!suggestTargets[suggestion.id]} onClick={() => reviewSuggestion(suggestion, "merge")} style={{ fontSize: 12, padding: "2px 8px", cursor: suggestTargets[suggestion.id] ? "pointer" : "not-allowed" }}>合并</button>
+                <button onClick={() => reviewSuggestion(suggestion, "reject")} style={{ fontSize: 12, padding: "2px 8px", cursor: "pointer", color: "#b00020" }}>拒绝</button>
+                {suggestion.material_id && <span style={{ fontSize: 12, color: "#888" }}>来源素材 #{suggestion.material_id}</span>}
+              </div>
+            );
+          })}
+        </div>
         {selDim ? (
           <>
             <h2 style={{ marginTop: 0 }}>{selDim.name}</h2>
@@ -134,14 +193,14 @@ export default function Tags() {
               <div style={{ fontWeight: 600, marginBottom: 8 }}>合并同义标签</div>
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 <span style={{ fontSize: 13 }}>源：</span>
-                <select value={mergeSrc ?? ""} onChange={e => setMergeSrc(e.target.value ? Number(e.target.value) : null)} style={{ padding: "3px", border: "1px solid #ccc", borderRadius: 3, maxWidth: 160 }}>
+                <select value={mergeSrc ?? ""} onChange={e => { setMergeSrc(e.target.value ? Number(e.target.value) : null); setMergeTgt(null); }} style={{ padding: "3px", border: "1px solid #ccc", borderRadius: 3, maxWidth: 160 }}>
                   <option value="">选源标签…</option>
                   {allValues.filter(v => v.status === "active").map(v => <option key={v.id} value={v.id}>[{v.dimName}] {v.value}</option>)}
                 </select>
                 <span style={{ fontSize: 13 }}>→ 目标：</span>
                 <select value={mergeTgt ?? ""} onChange={e => setMergeTgt(e.target.value ? Number(e.target.value) : null)} style={{ padding: "3px", border: "1px solid #ccc", borderRadius: 3, maxWidth: 160 }}>
                   <option value="">选目标标签…</option>
-                  {allValues.filter(v => v.status === "active").map(v => <option key={v.id} value={v.id}>[{v.dimName}] {v.value}</option>)}
+                  {mergeTargets.filter(v => v.id !== mergeSrc).map(v => <option key={v.id} value={v.id}>[{v.dimName}] {v.value}</option>)}
                 </select>
                 <button onClick={doMerge} style={{ padding: "4px 12px", border: "1px solid #ccc", borderRadius: 4, cursor: "pointer" }}>合并</button>
               </div>

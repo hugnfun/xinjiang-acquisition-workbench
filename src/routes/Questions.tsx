@@ -43,6 +43,10 @@ export default function Questions() {
   useEffect(() => { refreshClusters(); }, [refreshClusters]);
 
   useEffect(() => {
+    setCheckedQids(new Set());
+    setSelQuestion(null);
+    setRewriteId(null);
+    setMergeTgt(null);
     if (!selCid) { setQuestions([]); return; }
     let active = true;
     api.getClusterQuestions(selCid).then(list => { if (active) setQuestions(list); });
@@ -73,19 +77,19 @@ export default function Questions() {
     // Tauri webview 不支持 confirm()，用 window.alert 代替确认提示
     try {
       if (checkedQids.size > 0) {
-        // 只搬勾选的问题到目标簇（不是整簇合并）
-        for (const qid of checkedQids) {
-          await api.moveQuestion(qid, mergeTgt);
-        }
+        // 一次事务搬完，避免中途失败造成只移动一部分。
+        await api.batchMoveQuestions([...checkedQids], mergeTgt);
         setCheckedQids(new Set());
+        setQuestions(await api.getClusterQuestions(selCid));
       } else {
         // 没勾选问题 → 整簇合并
-        await api.mergeClusters(selCid, mergeTgt);
-        setSelCid(mergeTgt);  // 跳到目标簇
+        const targetId = mergeTgt;
+        await api.mergeClusters(selCid, targetId);
+        setSelCid(targetId);  // 跳到目标簇
+        setQuestions(await api.getClusterQuestions(targetId));
       }
       setMergeTgt(null); setMergeSearch("");
       refreshClusters();
-      if (selCid) setQuestions(await api.getClusterQuestions(selCid));
     }
     catch (e: any) { setErr(e?.message || String(e)); }
   };
@@ -101,7 +105,12 @@ export default function Questions() {
 
   const doSplit = async () => {
     if (!selCid || checkedQids.size === 0) { alert("先在问题列表勾选要拆分的问题"); return; }
-    try { await api.splitCluster(selCid, [...checkedQids], splitName.trim() || "新簇"); setCheckedQids(new Set()); setSplitName(""); refreshClusters(); }
+    try {
+      await api.splitCluster(selCid, [...checkedQids], splitName.trim() || "新簇");
+      setCheckedQids(new Set()); setSplitName("");
+      setQuestions(await api.getClusterQuestions(selCid));
+      refreshClusters();
+    }
     catch (e: any) { setErr(e?.message || String(e)); }
   };
 

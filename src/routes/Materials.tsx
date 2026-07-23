@@ -4,6 +4,7 @@ import type { MaterialSummary, MaterialDetail, TagDimensionView } from '../types
 import { getSelectedMaterialIds, toggleMaterialSelection, clearMaterialSelection, onSelectionChange } from '../App';
 
 type TagCtx = { x: number; y: number; mt: MaterialSummary["tags"][0] } | null;
+const PAGE_SIZE = 30;
 
 export default function Materials({ pendingMaterialId, onConsumed }: {
   pendingMaterialId?: number | null;
@@ -11,6 +12,7 @@ export default function Materials({ pendingMaterialId, onConsumed }: {
 }) {
   const [list, setList] = useState<MaterialSummary[]>([]);
   const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<MaterialDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -30,13 +32,13 @@ export default function Materials({ pendingMaterialId, onConsumed }: {
   const loadList = useCallback(async () => {
     setErr(null);
     try {
-      const r = await api.getMaterials(50, 0, order, search || undefined, filterTagId);
+      const r = await api.getMaterials(PAGE_SIZE, page * PAGE_SIZE, order, search || undefined, filterTagId);
       setList(r.items); setTotal(r.total);
     } catch (e: any) { setErr(e?.message || String(e)); }
-  }, [order, search, filterTagId]);
+  }, [order, search, filterTagId, page]);
 
   useEffect(() => {
-    api.initPort(); loadList(); api.getTags().then(setTags).catch(() => {});
+    api.initPort(); api.getTags().then(setTags).catch(() => {});
     const unsub = onSelectionChange(() => setSelCount(getSelectedMaterialIds().length));
     // spec §5.4: 从合成库点击来源素材跳转过来，自动打开详情
     if (pendingMaterialId) {
@@ -49,7 +51,10 @@ export default function Materials({ pendingMaterialId, onConsumed }: {
   useEffect(() => {
     if (searchTimer.current) clearTimeout(searchTimer.current);
     searchTimer.current = window.setTimeout(loadList, 300);
-  }, [search, order, filterTagId]);
+    return () => {
+      if (searchTimer.current) window.clearTimeout(searchTimer.current);
+    };
+  }, [loadList]);
 
   const open = async (id: number) => {
     setLoading(true);
@@ -105,14 +110,14 @@ export default function Materials({ pendingMaterialId, onConsumed }: {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <div style={{ padding: "8px 12px", borderBottom: "1px solid #eee", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-        <input placeholder="搜索标题/正文/作者…" value={search} onChange={e => setSearch(e.target.value)}
+        <input placeholder="搜索标题/正文/作者…" value={search} onChange={e => { setSearch(e.target.value); setPage(0); }}
           style={{ width: 200, padding: "4px 8px", border: "1px solid #ccc", borderRadius: 4 }} />
-        <select value={filterTagId ?? ""} onChange={e => setFilterTagId(e.target.value ? Number(e.target.value) : undefined)}
+        <select value={filterTagId ?? ""} onChange={e => { setFilterTagId(e.target.value ? Number(e.target.value) : undefined); setPage(0); }}
           style={{ padding: "4px", border: "1px solid #ccc", borderRadius: 4, maxWidth: 220 }}>
           <option value="">全部标签</option>
           {tags.map(d => d.values.map(v => <option key={v.id} value={v.id}>[{d.name}] {v.value} ({v.hit_count})</option>))}
         </select>
-        <select value={order} onChange={e => setOrder(e.target.value)} style={{ padding: "4px", border: "1px solid #ccc", borderRadius: 4 }}>
+        <select value={order} onChange={e => { setOrder(e.target.value); setPage(0); }} style={{ padding: "4px", border: "1px solid #ccc", borderRadius: 4 }}>
           <option value="likes">按点赞</option>
           <option value="collects">按收藏</option>
           <option value="latest">最新</option>
@@ -155,6 +160,15 @@ export default function Materials({ pendingMaterialId, onConsumed }: {
               </div>
             </div>
           ))}
+          {total > PAGE_SIZE && (
+            <div style={{ padding: 10, display: "flex", justifyContent: "center", alignItems: "center", gap: 8, borderTop: "1px solid #eee" }}>
+              <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0} style={{ padding: "3px 10px", cursor: page === 0 ? "not-allowed" : "pointer" }}>上一页</button>
+              <span style={{ fontSize: 12, color: "#666" }}>
+                {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} / {total}
+              </span>
+              <button onClick={() => setPage(p => p + 1)} disabled={(page + 1) * PAGE_SIZE >= total} style={{ padding: "3px 10px", cursor: (page + 1) * PAGE_SIZE >= total ? "not-allowed" : "pointer" }}>下一页</button>
+            </div>
+          )}
         </div>
         <div style={{ flex: 1, overflow: "auto", padding: 16 }}>
           {loading && <p>加载中…</p>}

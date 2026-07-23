@@ -67,7 +67,7 @@ def run_scrape_job(job_id: int, keyword: str, limit: int = 20):
                     _log(job_id, f"已入库 {nid}: {(r.get('title') or '')[:30]}")
                 else:
                     failed += 1
-                    _log(job_id, f"跳过 {nid}: 无 note.md", "error")
+                    _log(job_id, f"跳过 {nid}: 重复素材或无 note.md")
             except Exception as e:
                 failed += 1
                 _log(job_id, f"入库失败 {nid}: {e}", "error")
@@ -120,9 +120,9 @@ def run_scrape_note_job(job_id: int, url: str):
                      progress=3, finished_at=datetime.utcnow())
             _log(job_id, f"笔记已入库 {nid}")
         else:
-            _set_job(job_id, status="failed", error="无 note.md 文件",
+            _set_job(job_id, status="failed", error="重复素材或无 note.md 文件",
                      progress=3, finished_at=datetime.utcnow())
-            _log(job_id, "无 note.md，入库失败", "error")
+            _log(job_id, "重复素材或无 note.md，未入库", "error")
     except Exception as e:
         _set_job(job_id, status="failed", error=str(e), finished_at=datetime.utcnow())
         _log(job_id, f"失败: {e}", "error")
@@ -173,7 +173,7 @@ def run_scrape_user_job(job_id: int, url: str, limit: int = 20):
                     _log(job_id, f"已入库 {nid}: {(r.get('title') or '')[:30]}")
                 else:
                     failed += 1
-                    _log(job_id, f"跳过 {nid}: 无 note.md", "error")
+                    _log(job_id, f"跳过 {nid}: 重复素材或无 note.md")
             except Exception as e:
                 failed += 1
                 _log(job_id, f"入库失败 {nid}: {e}", "error")

@@ -5,6 +5,7 @@ item dict 兼容两种来源：manifest 项(likes_raw/folder) 与 opencli search
 """
 import re
 import shutil
+import hashlib
 from pathlib import Path
 
 from sidecar import config
@@ -31,8 +32,10 @@ def parse_likes(s: str) -> int:
 
 
 def note_id_from_url(url: str) -> str:
-    m = re.search(r"/search_result/([0-9a-f]+)", url)
-    return m.group(1) if m else url
+    m = re.search(r"/(?:search_result|explore)/([0-9a-fA-F]+)", url)
+    if m:
+        return m.group(1).lower()
+    return hashlib.sha256(url.strip().encode("utf-8")).hexdigest()[:32]
 
 
 def insert_note(s, folder, item: dict) -> bool:
@@ -48,6 +51,10 @@ def insert_note(s, folder, item: dict) -> bool:
     parsed = parse_note_md(note_md.read_text(encoding="utf-8"))
     url = item["url"]
     note_id = note_id_from_url(url)
+    if s.query(Material).filter_by(
+        platform="xiaohongshu", note_id=note_id
+    ).first():
+        return False
 
     m = Material(
         note_id=note_id,
