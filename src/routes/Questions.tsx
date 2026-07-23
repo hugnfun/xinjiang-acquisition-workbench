@@ -18,7 +18,7 @@ function buildTree(clusters: ClusterView[]): ClusterNode[] {
   return roots;
 }
 
-export default function Questions() {
+export default function Questions({ onNavigateToMaterial }: { onNavigateToMaterial?: (id: number) => void }) {
   const [clusters, setClusters] = useState<ClusterView[]>([]);
   const [selCid, setSelCid] = useState<number | null>(null);
   const [questions, setQuestions] = useState<QuestionView[]>([]);
@@ -219,7 +219,11 @@ export default function Questions() {
                       <div onClick={() => setSelQuestion(q)} style={{ cursor: "pointer" }}>
                         <div style={{ fontWeight: 500 }}>{q.normalized_text}</div>
                         <div style={{ color: "#aaa", fontSize: 12 }}>原文: {q.raw_text}</div>
-                        <div style={{ color: "#888", fontSize: 12 }}>来源评论 #{q.source_ref ?? "—"}</div>
+                        <div style={{ color: "#888", fontSize: 12 }}>
+                          {q.source_material_id ? (
+                            <span>来源: <span onClick={(e) => { e.stopPropagation(); onNavigateToMaterial?.(q.source_material_id!); }} style={{ color: "#2563eb", cursor: "pointer", textDecoration: "underline" }}>{q.source_material_title}</span> &mdash; "{q.source_comment_text}"</span>
+                          ) : q.source_ref ? `来源评论 #${q.source_ref}` : "无来源"}
+                        </div>
                       </div>
                     )}
                     {rewriteId !== q.id && (
@@ -239,7 +243,19 @@ export default function Questions() {
           <div style={{ marginBottom: 8 }}><strong>归一化：</strong>{selQuestion.normalized_text}</div>
           <div style={{ marginBottom: 8 }}><strong>原文：</strong>{selQuestion.raw_text}</div>
           <div style={{ marginBottom: 8 }}><strong>来源类型：</strong>{selQuestion.source_type}</div>
-          <div style={{ marginBottom: 8 }}><strong>来源评论 ID：</strong>{selQuestion.source_ref ?? "—"}</div>
+          {selQuestion.source_material_id ? (
+            <div style={{ marginBottom: 8 }}>
+              <strong>来源素材：</strong>
+              <span onClick={() => onNavigateToMaterial?.(selQuestion.source_material_id!)} style={{ color: "#2563eb", cursor: "pointer", textDecoration: "underline" }}>{selQuestion.source_material_title}</span>
+            </div>
+          ) : (
+            <div style={{ marginBottom: 8 }}><strong>来源评论 ID：</strong>{selQuestion.source_ref ?? "-"}</div>
+          )}
+          {selQuestion.source_comment_text && (
+            <div style={{ marginBottom: 8, padding: 8, background: "#f6f8fa", borderRadius: 4, fontSize: 13 }}>
+              <strong>原评论：</strong>{selQuestion.source_comment_text}
+            </div>
+          )}
           <button onClick={() => setSelQuestion(null)} style={{ padding: "4px 12px", border: "1px solid #ccc", borderRadius: 4, cursor: "pointer" }}>关闭</button>
         </div>
       )}

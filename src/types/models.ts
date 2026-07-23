@@ -38,6 +38,9 @@ export interface ClusterView {
 export interface QuestionView {
   id: number; normalized_text: string; raw_text: string;
   source_ref: number | null; source_type: string; cluster_id: number | null;
+  source_comment_text?: string | null;
+  source_material_id?: number | null;
+  source_material_title?: string | null;
 }
 export interface AssetView {
   id: number; type: string; text: string;

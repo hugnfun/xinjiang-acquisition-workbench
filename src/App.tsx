@@ -68,7 +68,7 @@ export default function App() {
           <Materials key={pendingMaterialId ?? 'm'} pendingMaterialId={pendingMaterialId}
             onConsumed={() => setPendingMaterialId(null)} />
         ) : tab === 'tags' ? <Tags /> :
-          tab === 'questions' ? <Questions /> :
+          tab === 'questions' ? <Questions onNavigateToMaterial={navigateToMaterial} /> :
           tab === 'jobs' ? <Jobs /> :
           <Synthesis onNavigateToMaterial={navigateToMaterial} />}
       </div>

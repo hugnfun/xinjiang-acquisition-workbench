@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sidecar.db.session import get_db
-from sidecar.db.models import Question, QuestionCluster
+from sidecar.db.models import Question, QuestionCluster, Comment, Material
 
 router = APIRouter()
 
@@ -29,21 +29,36 @@ def list_clusters(s: Session = Depends(get_db)):
 
 @router.get("/clusters/{cid}/questions")
 def cluster_questions(cid: int, s: Session = Depends(get_db)):
+    rows = s.query(Question, Comment, Material).outerjoin(
+        Comment, Comment.id == Question.source_ref
+    ).outerjoin(
+        Material, Material.id == Comment.material_id
+    ).filter(Question.cluster_id == cid).all()
     return [{"id": q.id, "normalized_text": q.normalized_text, "raw_text": q.raw_text,
-             "source_ref": q.source_ref, "source_type": q.source_type}
-            for q in s.query(Question).filter_by(cluster_id=cid).all()]
+             "source_ref": q.source_ref, "source_type": q.source_type,
+             "source_comment_text": c.text[:120] if c else None,
+             "source_material_id": m.id if m else None,
+             "source_material_title": m.title[:60] if m else None}
+            for q, c, m in rows]
 
 
 @router.get("/questions")
 def list_questions(
     cluster_id: int | None = None, s: Session = Depends(get_db)
 ):
-    q = s.query(Question)
+    q = s.query(Question, Comment, Material).outerjoin(
+        Comment, Comment.id == Question.source_ref
+    ).outerjoin(
+        Material, Material.id == Comment.material_id
+    )
     if cluster_id:
-        q = q.filter_by(cluster_id=cluster_id)
+        q = q.filter(Question.cluster_id == cluster_id)
     return [{"id": x.id, "normalized_text": x.normalized_text, "raw_text": x.raw_text,
-             "cluster_id": x.cluster_id, "source_ref": x.source_ref}
-            for x in q.all()]
+             "cluster_id": x.cluster_id, "source_ref": x.source_ref,
+             "source_comment_text": c.text[:120] if c else None,
+             "source_material_id": m.id if m else None,
+             "source_material_title": m.title[:60] if m else None}
+            for x, c, m in q.all()]
 
 
 class RenameIn(BaseModel):
