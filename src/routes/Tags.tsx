@@ -25,6 +25,8 @@ export default function Tags() {
   const [aliasVal, setAliasVal] = useState("");
   const [mergeSrc, setMergeSrc] = useState<number | null>(null);
   const [mergeTgt, setMergeTgt] = useState<number | null>(null);
+  const [sugRenameId, setSugRenameId] = useState<number | null>(null);
+  const [sugRenameVal, setSugRenameVal] = useState("");
 
   const refresh = async () => {
     try {
@@ -83,13 +85,15 @@ export default function Tags() {
   };
 
   const reviewSuggestion = async (
-    suggestion: TagSuggestionView, action: "accept" | "reject" | "merge"
+    suggestion: TagSuggestionView, action: "accept" | "reject" | "merge", rename?: string
   ) => {
     try {
       await api.actSuggestion(
         suggestion.id, action,
         action === "merge" ? suggestTargets[suggestion.id] : undefined,
+        rename,
       );
+      setSugRenameId(null); setSugRenameVal("");
       await refresh();
     } catch (e: any) { setErr(e?.message || String(e)); }
   };
@@ -104,6 +108,9 @@ export default function Tags() {
               background: selDimId === d.id ? "#e8f0fe" : "transparent", fontWeight: selDimId === d.id ? 600 : 400 }}>
             {d.name}
             <span style={{ color: "#999", fontSize: 12, marginLeft: 6 }}>{d.values.filter(v => v.status === "active").length}</span>
+            {suggestions.filter(s => s.dimension_name === d.name).length > 0 && (
+              <span style={{ marginLeft: "auto", fontSize: 11, padding: "0px 5px", borderRadius: 8, background: "#f59e0b", color: "#fff" }}>{suggestions.filter(s => s.dimension_name === d.name).length}</span>
+            )}
           </div>
         ))}
         <div style={{ marginTop: 12, padding: 8, background: "#f9f9f9", borderRadius: 4 }}>
@@ -125,7 +132,16 @@ export default function Tags() {
             return (
               <div key={suggestion.id} style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", padding: "6px 0", borderTop: "1px solid #f3e4b3" }}>
                 <span style={{ fontSize: 13, minWidth: 180 }}>[{suggestion.dimension_name}] <strong>{suggestion.proposed_value}</strong></span>
-                <button onClick={() => reviewSuggestion(suggestion, "accept")} style={{ fontSize: 12, padding: "2px 8px", cursor: "pointer" }}>接受为新标签</button>
+                <button onClick={() => reviewSuggestion(suggestion, "accept")} style={{ fontSize: 12, padding: "2px 8px", cursor: "pointer" }}>接受</button>
+                {sugRenameId === suggestion.id ? (
+                  <>
+                    <input value={sugRenameVal} onChange={e => setSugRenameVal(e.target.value)} placeholder="改名后接受" style={{ padding: "2px 4px", border: "1px solid #ddd", borderRadius: 3, fontSize: 12, width: 100 }} autoFocus onKeyDown={e => { if (e.key === "Enter" && sugRenameVal.trim()) reviewSuggestion(suggestion, "accept", sugRenameVal.trim()); }} />
+                    <button onClick={() => { if (sugRenameVal.trim()) reviewSuggestion(suggestion, "accept", sugRenameVal.trim()); }} style={{ fontSize: 12, padding: "2px 6px", cursor: "pointer" }}>确认</button>
+                    <button onClick={() => { setSugRenameId(null); setSugRenameVal(""); }} style={{ fontSize: 12, padding: "2px 6px", cursor: "pointer" }}>取消</button>
+                  </>
+                ) : (
+                  <button onClick={() => { setSugRenameId(suggestion.id); setSugRenameVal(suggestion.proposed_value); }} style={{ fontSize: 12, padding: "2px 8px", cursor: "pointer" }}>改名接受</button>
+                )}
                 <select value={suggestTargets[suggestion.id] ?? ""} onChange={e => setSuggestTargets(prev => ({ ...prev, [suggestion.id]: Number(e.target.value) }))} style={{ padding: "2px 4px", maxWidth: 160 }}>
                   <option value="">合并到现有标签…</option>
                   {targets.map(value => <option key={value.id} value={value.id}>{value.value}</option>)}
