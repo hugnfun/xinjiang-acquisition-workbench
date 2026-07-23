@@ -9,6 +9,9 @@ from sidecar import config
 
 CONFIDENCE_THRESHOLD = 0.6
 
+# 信息量为零的标签值：不写入 DB，避免占筛选位置
+_SKIP_VALUES = {"未提及", "不限", "其他"}
+
 def _taxonomy(s):
     out = []
     for d in s.query(TagDimension).all():
@@ -27,41 +30,55 @@ def _set_job(job_id, **fields):
         for k, v in fields.items():
             setattr(job, k, v)
 
+def _handle_suggestion(s, dim_name, value, material_id, material_title):
+    """写一条待审标签建议（去重）。"""
+    if value in _SKIP_VALUES:
+        return
+    exists = s.query(TagSuggestion).filter_by(
+        dimension_name=dim_name,
+        proposed_value=value,
+        material_id=material_id,
+        status="pending",
+    ).first()
+    if not exists:
+        s.add(TagSuggestion(
+            dimension_name=dim_name, proposed_value=value,
+            material_id=material_id, sample_context=material_title[:60],
+            status="pending"))
+
+
 def _apply_labels(s, material_id, material_title, labels):
-    """在调用方事务中写标签，返回新增 MaterialTag 条数。"""
-    added = 0
+    """在调用方事务中写标签，返回新增 MaterialTag 条数。
+
+    过滤规则：
+    1. 跳过信息量为零的值（未提及/不限/其他）
+    2. 每个维度只保留 confidence 最高的 1 个标签
+    """
+    by_dim = {}
     for lb in labels:
         dim_name = lb["dimension"]
         value = lb["value"]
-        conf = lb.get("confidence", 0.0)
-        if lb.get("out_of_taxonomy"):
-            exists = s.query(TagSuggestion).filter_by(
-                dimension_name=dim_name,
-                proposed_value=value,
-                material_id=material_id,
-                status="pending",
-            ).first()
-            if not exists:
-                s.add(TagSuggestion(
-                    dimension_name=dim_name, proposed_value=value,
-                    material_id=material_id, sample_context=material_title[:60],
-                    status="pending"))
+        if value in _SKIP_VALUES:
             continue
+        if lb.get("out_of_taxonomy"):
+            _handle_suggestion(s, dim_name, value, material_id, material_title)
+            continue
+        prev = by_dim.get(dim_name)
+        if prev is None or lb.get("confidence", 0) > prev.get("confidence", 0):
+            by_dim[dim_name] = lb
+
+    added = 0
+    for lb in by_dim.values():
+        dim_name = lb["dimension"]
+        value = lb["value"]
+        conf = lb.get("confidence", 0.0)
         dim = s.query(TagDimension).filter_by(name=dim_name).first()
         if not dim:
+            _handle_suggestion(s, dim_name, value, material_id, material_title)
             continue
         tv = s.query(TagValue).filter_by(dimension_id=dim.id, value=value).first()
         if not tv:
-            exists = s.query(TagSuggestion).filter_by(
-                dimension_name=dim_name,
-                proposed_value=value,
-                material_id=material_id,
-                status="pending",
-            ).first()
-            if not exists:
-                s.add(TagSuggestion(dimension_name=dim_name, proposed_value=value,
-                                    material_id=material_id, sample_context=material_title[:60],
-                                    status="pending"))
+            _handle_suggestion(s, dim_name, value, material_id, material_title)
             continue
         existing = s.query(MaterialTag).filter_by(
             material_id=material_id, tag_value_id=tv.id
@@ -74,6 +91,7 @@ def _apply_labels(s, material_id, material_title, labels):
             confidence=conf, confirmed_by_human=False))
         added += 1
     return added
+
 
 
 def _write_labels(material_id, material_title, labels, replace_ai=False):
