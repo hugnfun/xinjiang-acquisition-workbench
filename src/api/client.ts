@@ -49,13 +49,14 @@ async function put<T>(path: string, body: any): Promise<T> {
 
 export const api = {
   // ── 素材库 ──
-  getMaterials: (limit = 50, offset = 0, order = 'likes', search?: string, tagValueId?: number) => {
+  getMaterials: (limit = 30, offset = 0, order = 'likes', search?: string, tagValueIds?: number[], completeness?: string) => {
     const params = new URLSearchParams();
     params.set('limit', String(limit));
     params.set('offset', String(offset));
     params.set('order', order);
     if (search) params.set('search', search);
-    if (tagValueId) params.set('tag_value_id', String(tagValueId));
+    if (tagValueIds && tagValueIds.length) params.set('tag_value_ids', tagValueIds.join(','));
+    if (completeness) params.set('completeness', completeness);
     return get<{ total: number; items: MaterialSummary[] }>(`/materials?${params}`);
   },
   getMaterial: (id: number) => get<MaterialDetail>(`/materials/${id}`),

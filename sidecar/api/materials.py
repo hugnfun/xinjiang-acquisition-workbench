@@ -2,9 +2,12 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload, joinedload
+from sqlalchemy import func, and_
 from sidecar.db.session import get_db
-from sidecar.db.models import Material, MaterialTag, TagValue, TagDimension, TagSuggestion
+from sidecar.db.models import (
+    Material, MaterialTag, MaterialImage, TagValue, TagDimension, TagSuggestion,
+)
 from sidecar import config
 
 router = APIRouter()
@@ -12,21 +15,61 @@ router = APIRouter()
 
 @router.get("/materials")
 def list_materials(
-    limit: int = 50, offset: int = 0, order: str = "likes",
-    search: str | None = None, tag_value_id: int | None = None,
+    limit: int = 30, offset: int = 0, order: str = "likes",
+    search: str | None = None,
+    tag_value_id: int | None = None,
+    tag_value_ids: str | None = None,
+    completeness: str | None = None,
     s: Session = Depends(get_db),
 ):
-    # spec §5.1 顶栏：搜索框 · 标签多维筛选器 · 排序（点赞/收藏/最新）
+    """素材列表。
+
+    tag_value_ids: 逗号分隔的 tag_value_id 列表，AND 筛选（必须同时有所有标签）。
+    completeness: missing_url | missing_images | unlabeled | pending_review
+    """
     q = s.query(Material)
+
     if search:
         kw = f"%{search.strip()}%"
         q = q.filter(
             (Material.title.like(kw)) | (Material.content.like(kw)) | (Material.author.like(kw))
         )
+
+    # 单标签筛选（向后兼容）
     if tag_value_id:
         q = q.join(MaterialTag, MaterialTag.material_id == Material.id) \
              .filter(MaterialTag.tag_value_id == tag_value_id) \
              .distinct()
+
+    # 多维标签筛选（AND 逻辑）
+    if tag_value_ids:
+        ids = [int(x) for x in tag_value_ids.split(",") if x.strip()]
+        if len(ids) == 1:
+            q = q.join(MaterialTag, MaterialTag.material_id == Material.id) \
+                 .filter(MaterialTag.tag_value_id == ids[0]).distinct()
+        elif ids:
+            # 必须同时拥有所有指定标签
+            q = q.join(MaterialTag, MaterialTag.material_id == Material.id) \
+                 .filter(MaterialTag.tag_value_id.in_(ids)) \
+                 .group_by(Material.id) \
+                 .having(func.count(func.distinct(MaterialTag.tag_value_id)) == len(ids))
+
+    # 数据完整度筛选
+    if completeness == "missing_url":
+        q = q.filter((Material.url == "") | (Material.url.is_(None)))
+    elif completeness == "missing_images":
+        q = q.filter(~Material.id.in_(
+            s.query(MaterialImage.material_id).distinct()
+        ))
+    elif completeness == "unlabeled":
+        q = q.filter(~Material.id.in_(
+            s.query(MaterialTag.material_id).distinct()
+        ))
+    elif completeness == "pending_review":
+        q = q.join(MaterialTag, MaterialTag.material_id == Material.id) \
+             .filter(MaterialTag.confirmed_by_human == False) \
+             .distinct()
+
     if order == "collects":
         col = Material.collects
     elif order == "latest":
@@ -34,44 +77,51 @@ def list_materials(
     else:
         col = Material.likes
     q = q.order_by(col.desc())
+
     total = q.count()
-    items = q.offset(offset).limit(limit).all()
+    items = q.options(
+        selectinload(Material.tags).joinedload(MaterialTag.tag_value).joinedload(TagValue.dimension)
+    ).offset(offset).limit(limit).all()
+
     return {
         "total": total,
-        "items": [_material_summary(s, m) for m in items],
+        "items": [_material_summary(m) for m in items],
     }
 
 
-def _material_summary(s, m):
-    tags = s.query(MaterialTag).filter_by(material_id=m.id).all()
+def _material_summary(m: Material):
+    """从已 eager-load 的 Material 构建摘要，不再额外查询。"""
+    tags = []
+    for t in m.tags:
+        tv = t.tag_value
+        if not tv:
+            continue
+        dim = tv.dimension
+        tags.append({
+            "tag_value_id": t.tag_value_id,
+            "dimension": dim.name if dim else None,
+            "value": tv.value,
+            "source": t.source,
+            "confidence": t.confidence,
+            "confirmed_by_human": t.confirmed_by_human,
+        })
     return {
         "id": m.id, "title": m.title, "author": m.author,
         "likes": m.likes, "collects": m.collects, "comments_count": m.comments_count,
         "published_at": m.published_at, "tags_raw": m.tags_raw,
         "image_count": len(m.images),
-        "tags": [_tag_view(s, t) for t in tags],
-    }
-
-
-def _tag_view(s, mt):
-    tv = s.query(TagValue).get(mt.tag_value_id)
-    dim = s.query(TagDimension).get(tv.dimension_id) if tv else None
-    return {
-        "tag_value_id": mt.tag_value_id,
-        "dimension": dim.name if dim else None,
-        "value": tv.value if tv else None,
-        "source": mt.source,
-        "confidence": mt.confidence,
-        "confirmed_by_human": mt.confirmed_by_human,
+        "tags": tags,
     }
 
 
 @router.get("/materials/{mid}")
 def get_material(mid: int, s: Session = Depends(get_db)):
-    m = s.query(Material).get(mid)
+    m = s.query(Material).options(
+        selectinload(Material.tags).joinedload(MaterialTag.tag_value).joinedload(TagValue.dimension)
+    ).get(mid)
     if not m:
         raise HTTPException(404)
-    summary = _material_summary(s, m)
+    summary = _material_summary(m)
     summary.update({
         "content": m.content,
         "url": m.url,
@@ -90,9 +140,7 @@ def get_image(mid: int, path: str):
     return FileResponse(full)
 
 
-
-# spec §5.1 批量打同一标签（必须注册在 /materials/{mid}/tags 之前，
-# 否则 batch 被 {mid} 匹配 → 422）
+# spec §5.1 批量打同一标签
 class BatchTagIn(BaseModel):
     material_ids: list[int]
     tag_value_id: int
@@ -140,7 +188,6 @@ def manage_material_tag(
         s.commit()
         return {"ok": True}
     elif body.action == "suggest_new":
-        # 移除现有标签，写一条 tag_suggestion 给人 review
         if mt:
             tv = s.query(TagValue).get(mt.tag_value_id)
             dim_name = body.new_dimension or (tv.dimension.name if tv and tv.dimension else "")

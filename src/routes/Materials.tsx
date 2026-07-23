@@ -19,7 +19,8 @@ export default function Materials({ pendingMaterialId, onConsumed }: {
   const [tagErr, setTagErr] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [order, setOrder] = useState("likes");
-  const [filterTagId, setFilterTagId] = useState<number | undefined>(undefined);
+  const [filterTagIds, setFilterTagIds] = useState<Record<number, number | undefined>>({});
+  const [completeness, setCompleteness] = useState<string | undefined>(undefined);
   const [tags, setTags] = useState<TagDimensionView[]>([]);
   const [batchIds, setBatchIds] = useState<Set<number>>(new Set());
   const [selCount, setSelCount] = useState(0);
@@ -32,10 +33,11 @@ export default function Materials({ pendingMaterialId, onConsumed }: {
   const loadList = useCallback(async () => {
     setErr(null);
     try {
-      const r = await api.getMaterials(PAGE_SIZE, page * PAGE_SIZE, order, search || undefined, filterTagId);
+      const tids = Object.values(filterTagIds).filter(Boolean) as number[];
+      const r = await api.getMaterials(PAGE_SIZE, page * PAGE_SIZE, order, search || undefined, tids.length ? tids : undefined, completeness);
       setList(r.items); setTotal(r.total);
     } catch (e: any) { setErr(e?.message || String(e)); }
-  }, [order, search, filterTagId, page]);
+  }, [order, search, filterTagIds, completeness, page]);
 
   useEffect(() => {
     api.initPort(); api.getTags().then(setTags).catch(() => {});
@@ -112,10 +114,20 @@ export default function Materials({ pendingMaterialId, onConsumed }: {
       <div style={{ padding: "8px 12px", borderBottom: "1px solid #eee", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
         <input placeholder="搜索标题/正文/作者…" value={search} onChange={e => { setSearch(e.target.value); setPage(0); }}
           style={{ width: 200, padding: "4px 8px", border: "1px solid #ccc", borderRadius: 4 }} />
-        <select value={filterTagId ?? ""} onChange={e => { setFilterTagId(e.target.value ? Number(e.target.value) : undefined); setPage(0); }}
-          style={{ padding: "4px", border: "1px solid #ccc", borderRadius: 4, maxWidth: 220 }}>
-          <option value="">全部标签</option>
-          {tags.map(d => d.values.map(v => <option key={v.id} value={v.id}>[{d.name}] {v.value} ({v.hit_count})</option>))}
+        {tags.map(d => (
+          <select key={d.id} value={filterTagIds[d.id] ?? ""} onChange={e => { setFilterTagIds(prev => ({ ...prev, [d.id]: e.target.value ? Number(e.target.value) : undefined })); setPage(0); }}
+            style={{ padding: "4px", border: "1px solid #ccc", borderRadius: 4, maxWidth: 180 }}>
+            <option value="">{d.name}</option>
+            {d.values.filter(v => v.status === "active").map(v => <option key={v.id} value={v.id}>{v.value} ({v.hit_count})</option>)}
+          </select>
+        ))}
+        <select value={completeness ?? ""} onChange={e => { setCompleteness(e.target.value || undefined); setPage(0); }}
+          style={{ padding: "4px", border: "1px solid #ccc", borderRadius: 4 }}>
+          <option value="">完整度</option>
+          <option value="missing_url">缺 URL</option>
+          <option value="missing_images">缺图片</option>
+          <option value="unlabeled">未打标</option>
+          <option value="pending_review">待审核</option>
         </select>
         <select value={order} onChange={e => { setOrder(e.target.value); setPage(0); }} style={{ padding: "4px", border: "1px solid #ccc", borderRadius: 4 }}>
           <option value="likes">按点赞</option>
