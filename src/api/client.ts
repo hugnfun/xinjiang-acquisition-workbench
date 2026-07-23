@@ -134,6 +134,12 @@ export const api = {
   triggerScrape: (body: { mode: string; keyword?: string; url?: string; limit: number }) =>
     post<{ job_id: number }>(`/jobs/scrape`, body),
 
+  // ── Work Vault 导入 ──
+  scanWorkVault: (vault_dir: string) =>
+    post<import('../types/models').WorkVaultScanResult>('/work-vault/scan', { vault_dir }),
+  importWorkVault: (vault_dir: string, filenames: string[]) =>
+    post<{ job_id: number }>('/work-vault/import', { vault_dir, filenames }),
+
   // Image URLs are synchronous (<img src>), so they can't await resolvePort.
   getImageUrl: (mid: number, path: string) => {
     const port = _port || (import.meta as any).env.VITE_SIDECAR_PORT || '8765';

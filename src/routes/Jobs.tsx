@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState } from "react";
 import { api } from "../api/client";
-import type { JobView } from "../types/models";
+import type { JobView, WorkVaultScanItem } from "../types/models";
 
 interface JobLogEntry { level: string; message: string; created_at: string | null; }
 interface JobDetail {
@@ -10,7 +10,7 @@ interface JobDetail {
   logs: JobLogEntry[];
 }
 
-type JobTab = "scrape" | "ai";
+type JobTab = "scrape" | "ai" | "vault";
 
 export default function Jobs() {
   const [tab, setTab] = useState<JobTab>("scrape");
@@ -26,6 +26,12 @@ export default function Jobs() {
   const [scrapeKeyword, setScrapeKeyword] = useState("");
   const [scrapeUrl, setScrapeUrl] = useState("");
   const [scrapeLimit, setScrapeLimit] = useState(20);
+
+  // Work Vault import state
+  const [vaultDir, setVaultDir] = useState("/Users/aicer/Documents/Work Vault");
+  const [scanItems, setScanItems] = useState<WorkVaultScanItem[]>([]);
+  const [scanSummary, setScanSummary] = useState<Record<string, number>>({});
+  const [scanBusy, setScanBusy] = useState(false);
 
   const refresh = () => api.getJobs().then(setJobs).catch(e => setErr(e?.message || String(e)));
   useEffect(() => { refresh(); const t = setInterval(refresh, 2000); return () => clearInterval(t); }, []);
@@ -53,6 +59,27 @@ export default function Jobs() {
         url: scrapeMode !== "keyword" ? scrapeUrl.trim() : undefined,
         limit: scrapeLimit,
       });
+    } catch (e: any) { setErr(e?.message || String(e)); }
+    finally { setBusy(null); }
+    setTimeout(refresh, 500);
+  };
+
+  const scanWorkVault = async () => {
+    setScanBusy(true); setErr(null);
+    try {
+      const result = await api.scanWorkVault(vaultDir.trim());
+      setScanItems(result.items);
+      setScanSummary(result.summary);
+    } catch (e: any) { setErr(e?.message || String(e)); }
+    finally { setScanBusy(false); }
+  };
+
+  const importWorkVault = async (filenames: string[], label: string) => {
+    if (!filenames.length) { setErr("没有可导入的文件"); return; }
+    setBusy(label); setErr(null);
+    try {
+      await api.importWorkVault(vaultDir.trim(), filenames);
+      setScanItems([]); setScanSummary({});
     } catch (e: any) { setErr(e?.message || String(e)); }
     finally { setBusy(null); }
     setTimeout(refresh, 500);
@@ -86,6 +113,7 @@ export default function Jobs() {
       <div style={{ marginBottom: 16, display: "flex", gap: 4 }}>
         <button onClick={() => setTab("scrape")} style={{ padding: "6px 20px", border: "none", borderRadius: 4, cursor: "pointer", background: tab === "scrape" ? "#2563eb" : "#e5e7eb", color: tab === "scrape" ? "#fff" : "#333", fontWeight: tab === "scrape" ? 600 : 400 }}>抓取</button>
         <button onClick={() => setTab("ai")} style={{ padding: "6px 20px", border: "none", borderRadius: 4, cursor: "pointer", background: tab === "ai" ? "#2563eb" : "#e5e7eb", color: tab === "ai" ? "#fff" : "#333", fontWeight: tab === "ai" ? 600 : 400 }}>AI 批处理</button>
+        <button onClick={() => setTab("vault")} style={{ padding: "6px 20px", border: "none", borderRadius: 4, cursor: "pointer", background: tab === "vault" ? "#2563eb" : "#e5e7eb", color: tab === "vault" ? "#fff" : "#333", fontWeight: tab === "vault" ? 600 : 400 }}>Work Vault 导入</button>
       </div>
 
       {tab === "scrape" && (
@@ -128,6 +156,62 @@ export default function Jobs() {
           <button onClick={() => trigger("report")} disabled={busy !== null || running} style={{ padding: "6px 16px", border: "1px solid #ccc", borderRadius: 4, background: "#f5f5f5", cursor: "pointer", opacity: busy !== null || running ? 0.6 : 1 }}>
             {busy === "report" ? "提交中…" : "生成周报"}
           </button>
+        </div>
+      )}
+
+      {tab === "vault" && (
+        <div style={{ marginBottom: 16, padding: 12, background: "#f6f8fa", borderRadius: 6 }}>
+          <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
+            <input value={vaultDir} onChange={e => setVaultDir(e.target.value)} placeholder="/Users/aicer/Documents/Work Vault" style={{ padding: "4px 8px", border: "1px solid #ccc", borderRadius: 4, width: 340 }} />
+            <button onClick={scanWorkVault} disabled={scanBusy || busy !== null || running} style={{ padding: "4px 16px", border: "1px solid #2563eb", borderRadius: 4, background: "#2563eb", color: "#fff", cursor: "pointer", opacity: scanBusy || busy !== null || running ? 0.6 : 1 }}>
+              {scanBusy ? "扫描中…" : "扫描（dry-run）"}
+            </button>
+          </div>
+          {scanItems.length > 0 && (
+            <>
+              <div style={{ display: "flex", gap: 12, marginBottom: 8, fontSize: 13 }}>
+                {Object.entries(scanSummary).map(([k, v]) => (
+                  <span key={k} style={{ padding: "1px 8px", borderRadius: 3, background: k === "valid" ? "#d4edda" : k === "duplicate_db" || k === "duplicate_vault" ? "#fff3cd" : "#e5e7eb", color: k === "valid" ? "#155724" : k === "duplicate_db" || k === "duplicate_vault" ? "#856404" : "#555" }}>{k}: {v}</span>
+                ))}
+              </div>
+              <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                <button onClick={() => importWorkVault(scanItems.filter(i => i.status === "valid").slice(0, 5).map(i => i.filename), "trial")} disabled={busy !== null || running} style={{ padding: "4px 16px", border: "1px solid #2563eb", borderRadius: 4, background: "#2563eb", color: "#fff", cursor: "pointer", opacity: busy !== null || running ? 0.6 : 1 }}>
+                  {busy === "trial" ? "导入中…" : "试导入 5 篇"}
+                </button>
+                <button onClick={() => importWorkVault(scanItems.filter(i => i.status === "valid").map(i => i.filename), "full")} disabled={busy !== null || running} style={{ padding: "4px 16px", border: "1px solid #2563eb", borderRadius: 4, background: "#2563eb", color: "#fff", cursor: "pointer", opacity: busy !== null || running ? 0.6 : 1 }}>
+                  {busy === "full" ? "导入中…" : "全量导入（" + scanItems.filter(i => i.status === "valid").length + " 篇）"}
+                </button>
+              </div>
+              <div style={{ maxHeight: 360, overflow: "auto", border: "1px solid #eee", borderRadius: 4, background: "#fff" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                  <thead style={{ position: "sticky", top: 0, background: "#f6f8fa" }}>
+                    <tr style={{ borderBottom: "1px solid #eee", textAlign: "left" }}>
+                      <th style={{ padding: "4px 8px" }}>状态</th>
+                      <th style={{ padding: "4px 8px" }}>文件名</th>
+                      <th style={{ padding: "4px 8px" }}>图</th>
+                      <th style={{ padding: "4px 8px" }}>评论</th>
+                      <th style={{ padding: "4px 8px" }}>发布</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {scanItems.map(item => (
+                      <tr key={item.filename} style={{ borderBottom: "1px solid #f0f0f0" }}>
+                        <td style={{ padding: "3px 8px" }}>
+                          <span style={{ fontSize: 11, padding: "1px 5px", borderRadius: 3, background: item.status === "valid" ? "#d4edda" : item.status.startsWith("duplicate") ? "#fff3cd" : item.status === "missing_images" ? "#ffe0b2" : "#e5e7eb", color: item.status === "valid" ? "#155724" : item.status.startsWith("duplicate") ? "#856404" : "#555" }}>
+                            {item.status === "duplicate_vault" ? "vault重复" : item.status === "duplicate_db" ? "DB重复" : item.status === "missing_images" ? "缺图" : item.status === "non_note" ? "非笔记" : item.status === "empty" ? "空" : "有效"}
+                          </span>
+                        </td>
+                        <td style={{ padding: "3px 8px", maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={item.filename}>{item.filename}</td>
+                        <td style={{ padding: "3px 8px", color: item.image_missing.length > 0 ? "#e65100" : "#666" }}>{item.image_count}{item.image_missing.length > 0 ? "(" + item.image_missing.length + "缺)" : ""}</td>
+                        <td style={{ padding: "3px 8px", color: "#666" }}>{item.comment_count_parsed}/{item.comment_count_declared}</td>
+                        <td style={{ padding: "3px 8px", color: "#999", fontSize: 12 }}>{item.published_at || "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
         </div>
       )}
 

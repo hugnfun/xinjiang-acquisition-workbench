@@ -43,3 +43,25 @@ export interface AssetView {
   id: number; type: string; text: string;
   derived_from: number[]; tags: string[]; disliked: boolean;
 }
+
+export interface WorkVaultScanItem {
+  filename: string;
+  title: string;
+  status: string;
+  content_hash: string;
+  image_count: number;
+  image_missing: string[];
+  comment_count_declared: number;
+  comment_count_parsed: number;
+  body_preview: string;
+  tags_raw: string;
+  published_at: string;
+  duplicate_of: string;
+}
+
+export interface WorkVaultScanResult {
+  vault_dir: string;
+  total_files: number;
+  summary: Record<string, number>;
+  items: WorkVaultScanItem[];
+}
