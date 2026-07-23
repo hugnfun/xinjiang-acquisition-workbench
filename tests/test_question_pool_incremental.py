@@ -85,3 +85,60 @@ def test_incremental_no_new_comments_done_quickly(tmp_path, monkeypatch):
     assert j.status == "done"
     assert j.result_summary == {"new_questions": 0, "merged": 0, "new_clusters": 0}
     assert called["filter"] == 0  # 无新评论不该调 filter
+
+
+def test_non_question_comment_is_not_sent_again(tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch)
+    calls = {"filter": 0}
+
+    def reject_all(payload):
+        calls["filter"] += 1
+        return [{"raw": item["raw"], "is_question": False} for item in payload]
+
+    monkeypatch.setattr(qp.tc, "filter_questions", reject_all)
+    s = get_session()
+    first = ScrapeJob(
+        type="question_pool", status="queued", params={"mode": "incremental"}
+    )
+    s.add(first); s.commit()
+    first_id = first.id
+    s.close()
+    qp.run_question_pool_incremental(first_id)
+
+    s = get_session()
+    second = ScrapeJob(
+        type="question_pool", status="queued", params={"mode": "incremental"}
+    )
+    s.add(second); s.commit()
+    second_id = second.id
+    statuses = {
+        c.question_status for c in s.query(Comment).filter_by(is_reply=False).all()
+    }
+    s.close()
+    qp.run_question_pool_incremental(second_id)
+
+    assert calls["filter"] == 1
+    assert statuses == {"not_question"}
+
+
+def test_failed_filter_batch_stays_pending_for_retry(tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        qp.tc, "filter_questions",
+        lambda payload: (_ for _ in ()).throw(RuntimeError("provider down")),
+    )
+    s = get_session()
+    job = ScrapeJob(
+        type="question_pool", status="queued", params={"mode": "incremental"}
+    )
+    s.add(job); s.commit()
+    jid = job.id
+    s.close()
+    qp.run_question_pool_incremental(jid)
+
+    s = get_session()
+    assert s.get(ScrapeJob, jid).status == "failed"
+    assert {
+        c.question_status for c in s.query(Comment).filter_by(is_reply=False).all()
+    } == {"pending"}
+    s.close()

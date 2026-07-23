@@ -27,37 +27,71 @@ def _set_job(job_id, **fields):
         for k, v in fields.items():
             setattr(job, k, v)
 
-def _write_labels(material_id, material_title, labels):
-    """把一篇素材的标签落库（短 session）。返回写入的 MaterialTag 条数。"""
+def _apply_labels(s, material_id, material_title, labels):
+    """在调用方事务中写标签，返回新增 MaterialTag 条数。"""
     added = 0
-    with session_scope() as s:
-        for lb in labels:
-            dim_name = lb["dimension"]
-            value = lb["value"]
-            conf = lb.get("confidence", 0.0)
-            if lb.get("out_of_taxonomy"):
+    for lb in labels:
+        dim_name = lb["dimension"]
+        value = lb["value"]
+        conf = lb.get("confidence", 0.0)
+        if lb.get("out_of_taxonomy"):
+            exists = s.query(TagSuggestion).filter_by(
+                dimension_name=dim_name,
+                proposed_value=value,
+                material_id=material_id,
+                status="pending",
+            ).first()
+            if not exists:
                 s.add(TagSuggestion(
                     dimension_name=dim_name, proposed_value=value,
                     material_id=material_id, sample_context=material_title[:60],
                     status="pending"))
-                continue
-            dim = s.query(TagDimension).filter_by(name=dim_name).first()
-            if not dim:
-                continue
-            tv = s.query(TagValue).filter_by(dimension_id=dim.id, value=value).first()
-            if not tv:
+            continue
+        dim = s.query(TagDimension).filter_by(name=dim_name).first()
+        if not dim:
+            continue
+        tv = s.query(TagValue).filter_by(dimension_id=dim.id, value=value).first()
+        if not tv:
+            exists = s.query(TagSuggestion).filter_by(
+                dimension_name=dim_name,
+                proposed_value=value,
+                material_id=material_id,
+                status="pending",
+            ).first()
+            if not exists:
                 s.add(TagSuggestion(dimension_name=dim_name, proposed_value=value,
                                     material_id=material_id, sample_context=material_title[:60],
                                     status="pending"))
-                continue
-            existing = s.query(MaterialTag).filter_by(material_id=material_id, tag_value_id=tv.id).first()
-            if existing:
-                continue
-            s.add(MaterialTag(
-                material_id=material_id, tag_value_id=tv.id, source=lb.get("source", "ai_text"),
-                confidence=conf, confirmed_by_human=False))
-            added += 1
+            continue
+        existing = s.query(MaterialTag).filter_by(
+            material_id=material_id, tag_value_id=tv.id
+        ).first()
+        if existing:
+            continue
+        s.add(MaterialTag(
+            material_id=material_id, tag_value_id=tv.id,
+            source=lb.get("source", "ai_text"),
+            confidence=conf, confirmed_by_human=False))
+        added += 1
     return added
+
+
+def _write_labels(material_id, material_title, labels, replace_ai=False):
+    """短事务落库；重打标只在新结果有效后原子替换旧 AI 标签。"""
+    if not labels:
+        raise ValueError("模型未返回有效标签")
+    with session_scope() as s:
+        if replace_ai:
+            s.query(MaterialTag).filter(
+                MaterialTag.material_id == material_id,
+                MaterialTag.source.in_(["ai_text", "ai_vision", "ai"]),
+            ).delete(synchronize_session=False)
+            s.flush()
+        added = _apply_labels(s, material_id, material_title, labels)
+        if replace_ai and added == 0:
+            raise ValueError("新结果没有可落库的有效标签，保留原 AI 标签")
+        return added
+
 
 def run_label_job(job_id: int):
     _set_job(job_id, status="running", started_at=datetime.utcnow(), progress=0, progress_total=0)
@@ -66,7 +100,11 @@ def run_label_job(job_id: int):
     # 短 session 读 taxonomy + 素材，提取标量；LLM 打标期间不持有 session
     with session_scope() as s:
         taxonomy = _taxonomy(s)
-        materials = s.query(Material).all()
+        # 常规批量打标只处理尚无 AI 标签的素材；“重打标”走单独入口。
+        ai_tagged_ids = s.query(MaterialTag.material_id).filter(
+            MaterialTag.source.in_(["ai_text", "ai_vision", "ai"])
+        )
+        materials = s.query(Material).filter(~Material.id.in_(ai_tagged_ids)).all()
         mat_data = [{
             "id": m.id, "title": m.title, "content": m.content,
             "images": [img.path for img in m.images[:3]],
@@ -82,6 +120,8 @@ def run_label_job(job_id: int):
             image_paths = [config.MEDIA_DIR / p for p in md["images"]]
             try:
                 labels = label_material(md["title"], md["content"], image_paths, taxonomy)
+                if not labels:
+                    raise ValueError("模型未返回有效标签")
             except Exception as e:
                 failed += 1
                 last_error = str(e)
@@ -113,8 +153,8 @@ def run_label_job(job_id: int):
 def run_relabel_job(job_id: int, material_ids: list[int]):
     """spec §5.1 批量触发 AI 重打标：只对选中素材重新打标。
 
-    与全量打标的区别：先清掉选中素材的 ai_text/ai_vision 标签（保留 human 标签），
-    再重新调 LLM 打标。"""
+    与全量打标的区别：先生成有效新标签，再用单个事务替换旧 AI 标签；
+    LLM 失败或任务取消时保留原标签，human 标签始终不动。"""
     _set_job(job_id, status="running", started_at=datetime.utcnow(), progress=0, progress_total=0)
     _log(job_id, f"开始重打标：{len(material_ids)} 篇素材")
     with session_scope() as s:
@@ -124,13 +164,6 @@ def run_relabel_job(job_id: int, material_ids: list[int]):
             m = s.query(Material).get(mid)
             if not m:
                 continue
-            # 清掉 AI 标签（保留 human 标签）
-            ai_tags = s.query(MaterialTag).filter(
-                MaterialTag.material_id == mid,
-                MaterialTag.source.in_(["ai_text", "ai_vision"]),
-            ).all()
-            for mt in ai_tags:
-                s.delete(mt)
             mats.append({
                 "id": m.id, "title": m.title, "content": m.content,
                 "images": [img.path for img in m.images[:3]],
@@ -146,12 +179,16 @@ def run_relabel_job(job_id: int, material_ids: list[int]):
             image_paths = [config.MEDIA_DIR / p for p in md["images"]]
             try:
                 labels = label_material(md["title"], md["content"], image_paths, taxonomy)
+                if not labels:
+                    raise ValueError("模型未返回有效标签")
             except Exception as e:
                 failed += 1
                 last_error = str(e)
                 _log(job_id, f"素材 {md['id']} 重打标失败: {e}", "error")
                 continue
-            _write_labels(md["id"], md["title"], labels)
+            if cancellation_checkpoint(job_id):
+                return
+            _write_labels(md["id"], md["title"], labels, replace_ai=True)
             labeled += 1
             _set_job(job_id, progress=labeled + failed)
             _log(job_id, f"素材 {md['id']} 重打标完成 ({len(labels)} 标签)")

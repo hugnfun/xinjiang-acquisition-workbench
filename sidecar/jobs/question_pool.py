@@ -1,6 +1,6 @@
 from datetime import datetime
 import numpy as np
-from sidecar.db.session import get_session, session_scope
+from sidecar.db.session import session_scope
 from sidecar.db.models import (Comment, Question, QuestionCluster, ScrapeJob,
                                JobLog)
 from sidecar.llm import task_client as tc
@@ -35,34 +35,116 @@ def _batched(items, size):
         yield items[i:i + size]
 
 
+def _sync_legacy_question_status(s):
+    """兼容迁移前或测试中手工创建的 Question。"""
+    referenced = [
+        row[0] for row in s.query(Question.source_ref).filter(
+            Question.source_type == "comment",
+            Question.source_ref.isnot(None),
+        ).all()
+    ]
+    if referenced:
+        s.query(Comment).filter(
+            Comment.id.in_(referenced),
+            Comment.question_status == "pending",
+        ).update(
+            {
+                Comment.question_status: "question",
+                Comment.question_processed_at: datetime.utcnow(),
+            },
+            synchronize_session=False,
+        )
+
+
+def _mark_comments(comment_ids: list[int], status: str):
+    if not comment_ids:
+        return
+    with session_scope() as s:
+        s.query(Comment).filter(Comment.id.in_(comment_ids)).update(
+            {
+                Comment.question_status: status,
+                Comment.question_processed_at: datetime.utcnow(),
+            },
+            synchronize_session=False,
+        )
+
+
+def _filter_candidates(job_id: int, comment_data):
+    """过滤问题并持久化非问题游标；失败批次保持 pending 供重试。"""
+    questions_data = []
+    failed_batches = 0
+    for batch in _batched(comment_data, BATCH):
+        if cancellation_checkpoint(job_id):
+            return None
+        empty_ids = [cid for cid, txt in batch if not txt]
+        _mark_comments(empty_ids, "excluded")
+        non_empty = [(cid, txt) for cid, txt in batch if txt]
+        payload = [{"raw": txt} for cid, txt in non_empty]
+        if not payload:
+            continue
+        try:
+            results = tc.filter_questions(payload)
+        except Exception as e:
+            failed_batches += 1
+            _log(job_id, f"过滤批次失败: {e}", "error")
+            continue
+        if len(results) != len(non_empty):
+            failed_batches += 1
+            _log(
+                job_id,
+                f"过滤结果数量不匹配：请求 {len(non_empty)}，返回 {len(results)}",
+                "error",
+            )
+        not_question_ids = []
+        for r, (cid, txt) in zip(results, non_empty):
+            if r.get("is_question"):
+                questions_data.append({
+                    "raw": r.get("raw", txt), "comment_id": cid
+                })
+            else:
+                not_question_ids.append(cid)
+        _mark_comments(not_question_ids, "not_question")
+    return questions_data, failed_batches
+
+
 def run_question_pool_job(job_id: int):
     _set_job(job_id, status="running", started_at=datetime.utcnow())
     _log(job_id, "开始问题池冷启动")
     try:
+        with session_scope() as s:
+            has_questions = s.query(Question).count() > 0
+        if has_questions:
+            error = "问题池已有数据，冷启动不可重复执行；请使用增量更新"
+            _set_job(
+                job_id, status="failed", error=error,
+                finished_at=datetime.utcnow(),
+            )
+            _log(job_id, error, "error")
+            return
         # Stage 1: 过滤"是不是问题"（短 session 读评论，LLM 调用无 session）
         with session_scope() as s:
-            comments = s.query(Comment).filter(Comment.is_reply == False).all()
+            comments = s.query(Comment).filter(
+                Comment.is_reply == False,
+                Comment.question_status == "pending",
+            ).all()
             # 提取标量到普通 tuple，session 关闭后仍可用
             comment_data = [(c.id, (c.text or "").strip()) for c in comments]
         _log(job_id, f"待过滤评论 {len(comment_data)} 条")
-        questions_data = []
-        for batch in _batched(comment_data, BATCH):
-            if cancellation_checkpoint(job_id):
-                return
-            non_empty = [(cid, txt) for cid, txt in batch if txt]
-            payload = [{"raw": txt} for cid, txt in non_empty]
-            if not payload:
-                continue
-            try:
-                results = tc.filter_questions(payload)
-            except Exception as e:
-                _log(job_id, f"过滤批次失败: {e}", "error")
-                continue
-            for r, (cid, txt) in zip(results, non_empty):
-                if r.get("is_question"):
-                    questions_data.append({"raw": r.get("raw", txt), "comment_id": cid})
+        filtered = _filter_candidates(job_id, comment_data)
+        if filtered is None:
+            return
+        questions_data, failed_filter_batches = filtered
         _log(job_id, f"Stage1 过滤出 {len(questions_data)} 个问题")
         if not questions_data:
+            if failed_filter_batches:
+                error = f"{failed_filter_batches} 个过滤批次失败，评论保留待重试"
+                _set_job(
+                    job_id, status="failed", error=error,
+                    result_summary={"questions": 0, "clusters": 0},
+                    finished_at=datetime.utcnow(),
+                )
+                _log(job_id, error, "error")
+                return
             _set_job(job_id, status="done", result_summary={"questions": 0, "clusters": 0},
                      finished_at=datetime.utcnow())
             _log(job_id, "无问题，完成")
@@ -111,6 +193,10 @@ def run_question_pool_job(job_id: int):
                     source_ref=q["comment_id"], source_type="comment",
                     embedding=vec.tobytes(), cluster_id=cid,
                 ))
+                comment = s.get(Comment, q["comment_id"])
+                if comment:
+                    comment.question_status = "question"
+                    comment.question_processed_at = datetime.utcnow()
         # 更新簇计数（短 session）
         with session_scope() as s:
             for cid in cluster_id_map.values():
@@ -141,9 +227,14 @@ def run_question_pool_job(job_id: int):
                     cl.description = named.get("description", "")
         _log(job_id, "Stage5 命名完成")
 
+        result_summary = {
+            "questions": len(questions_data),
+            "clusters": len(cluster_id_map),
+        }
+        if failed_filter_batches:
+            result_summary["failed_filter_batches"] = failed_filter_batches
         _set_job(job_id, status="done",
-                 result_summary={"questions": len(questions_data),
-                                 "clusters": len(cluster_id_map)},
+                 result_summary=result_summary,
                  finished_at=datetime.utcnow())
         _log(job_id, f"完成：{len(questions_data)} 问题，{len(cluster_id_map)} 簇")
     except Exception as e:
@@ -171,6 +262,7 @@ def run_question_pool_incremental(job_id: int):
         threshold = config.CLUSTER_SIMILARITY_THRESHOLD
         # 1. 现有簇质心 + 已处理 comment_id 集合 + 新评论
         with session_scope() as s:
+            _sync_legacy_question_status(s)
             clusters = s.query(QuestionCluster).all()
             centroids: dict[int, np.ndarray] = {}  # cluster_id -> 质心
             for cl in clusters:
@@ -179,11 +271,15 @@ def run_question_pool_incremental(job_id: int):
                     continue
                 vecs = np.array([np.frombuffer(q.embedding, dtype=np.float32) for q in qs])
                 centroids[cl.id] = vecs.mean(axis=0)
-            done = {str(r[0]) for r in s.query(Question.source_ref).all() if r[0] is not None}
-            new_comments = s.query(Comment).filter(Comment.is_reply == False).all()
-            comment_data = [(c.id, (c.text or "").strip()) for c in new_comments
-                            if str(c.id) not in done]
-        _log(job_id, f"增量：{len(comment_data)} 条新评论（已处理 {len(done)} 条）")
+            new_comments = s.query(Comment).filter(
+                Comment.is_reply == False,
+                Comment.question_status == "pending",
+            ).all()
+            comment_data = [(c.id, (c.text or "").strip()) for c in new_comments]
+            processed = s.query(Comment).filter(
+                Comment.question_status != "pending"
+            ).count()
+        _log(job_id, f"增量：{len(comment_data)} 条新评论（已处理 {processed} 条）")
         if not comment_data:
             _set_job(job_id, status="done",
                      result_summary={"new_questions": 0, "merged": 0, "new_clusters": 0},
@@ -192,23 +288,22 @@ def run_question_pool_incremental(job_id: int):
             return
 
         # 2. 过滤 + 归一化 + embedding（同全量，但只对新评论）
-        questions_data = []
-        for batch in _batched(comment_data, BATCH):
-            if cancellation_checkpoint(job_id):
-                return
-            non_empty = [(cid, txt) for cid, txt in batch if txt]
-            payload = [{"raw": txt} for cid, txt in non_empty]
-            if not payload:
-                continue
-            try:
-                results = tc.filter_questions(payload)
-            except Exception as e:
-                _log(job_id, f"过滤批次失败: {e}", "error")
-                continue
-            for r, (cid, txt) in zip(results, non_empty):
-                if r.get("is_question"):
-                    questions_data.append({"raw": r.get("raw", txt), "comment_id": cid})
+        filtered = _filter_candidates(job_id, comment_data)
+        if filtered is None:
+            return
+        questions_data, failed_filter_batches = filtered
         if not questions_data:
+            if failed_filter_batches:
+                error = f"{failed_filter_batches} 个过滤批次失败，评论保留待重试"
+                _set_job(
+                    job_id, status="failed", error=error,
+                    result_summary={
+                        "new_questions": 0, "merged": 0, "new_clusters": 0,
+                    },
+                    finished_at=datetime.utcnow(),
+                )
+                _log(job_id, error, "error")
+                return
             _set_job(job_id, status="done",
                      result_summary={"new_questions": 0, "merged": 0, "new_clusters": 0},
                      finished_at=datetime.utcnow())
@@ -260,6 +355,10 @@ def run_question_pool_incremental(job_id: int):
                     source_ref=q["comment_id"], source_type="comment",
                     embedding=vec.tobytes(), cluster_id=cid,
                 ))
+                comment = s.get(Comment, q["comment_id"])
+                if comment:
+                    comment.question_status = "question"
+                    comment.question_processed_at = datetime.utcnow()
         _log(job_id, f"增量分配完成：{len(questions_data)} 新问题，并入 {merged}，新建 {len(new_cluster_ids)} 簇")
 
         # 4. 更新受影响簇计数
@@ -290,9 +389,15 @@ def run_question_pool_incremental(job_id: int):
                     cl.name = named.get("name", "")
                     cl.description = named.get("description", "")
 
+        result_summary = {
+            "new_questions": len(questions_data),
+            "merged": merged,
+            "new_clusters": len(new_cluster_ids),
+        }
+        if failed_filter_batches:
+            result_summary["failed_filter_batches"] = failed_filter_batches
         _set_job(job_id, status="done",
-                 result_summary={"new_questions": len(questions_data),
-                                 "merged": merged, "new_clusters": len(new_cluster_ids)},
+                 result_summary=result_summary,
                  finished_at=datetime.utcnow())
         _log(job_id, f"完成：新增 {len(questions_data)} 问题，并入 {merged}，新建 {len(new_cluster_ids)} 簇")
     except Exception as e:

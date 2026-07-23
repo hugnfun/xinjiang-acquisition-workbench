@@ -117,7 +117,7 @@ export default function Jobs() {
         <div style={{ marginBottom: 16, padding: 12, background: "#f6f8fa", borderRadius: 6, display: "flex", gap: 8, flexWrap: "wrap" }}>
           {/* AI tab：批量打标 / 提炼问题 / 合成卖点 (spec §5.5) */}
           <button onClick={() => trigger("label")} disabled={busy !== null || running} style={{ padding: "6px 16px", border: "1px solid #2563eb", borderRadius: 4, background: "#2563eb", color: "#fff", cursor: "pointer", opacity: busy !== null || running ? 0.6 : 1 }}>
-            {busy === "label" ? "提交中…" : "批量打标（全部素材）"}
+            {busy === "label" ? "提交中…" : "批量打标（仅未打标素材）"}
           </button>
           <button onClick={() => trigger("question-pool")} disabled={busy !== null || running} style={{ padding: "6px 16px", border: "1px solid #2563eb", borderRadius: 4, background: "#2563eb", color: "#fff", cursor: "pointer", opacity: busy !== null || running ? 0.6 : 1 }}>
             {busy === "question-pool" ? "提交中…" : "提炼问题（冷启动）"}

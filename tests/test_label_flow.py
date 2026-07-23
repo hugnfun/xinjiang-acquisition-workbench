@@ -92,3 +92,120 @@ def test_source_propagated_to_material_tag(tmp_path, monkeypatch):
     # 风景震撼是 in-taxonomy → MaterialTag，source=ai_text
     mt = [t for t in tags]
     assert any(t.source == "ai_text" for t in mt), f"expected ai_text source, got {[t.source for t in mt]}"
+
+
+def test_relabel_failure_preserves_existing_tags(tmp_path, monkeypatch):
+    monkeypatch.setattr("sidecar.config.DB_PATH", tmp_path / "t.db")
+    monkeypatch.setattr("sidecar.config.MEDIA_DIR", tmp_path / "media")
+    seed.seed_taxonomy()
+    imp.import_folder(Path(__file__).parent / "fixtures" / "import_root")
+
+    from sidecar.db.models import Material, MaterialTag, ScrapeJob, TagValue
+    from sidecar.db.session import get_session
+    s = get_session()
+    material = s.query(Material).first()
+    ai_value = s.query(TagValue).filter_by(value="风景震撼").one()
+    human_value = s.query(TagValue).filter_by(value="避坑攻略").one()
+    s.add_all([
+        MaterialTag(
+            material_id=material.id, tag_value_id=ai_value.id,
+            source="ai_text", confidence=0.9,
+        ),
+        MaterialTag(
+            material_id=material.id, tag_value_id=human_value.id,
+            source="human", confirmed_by_human=True,
+        ),
+    ])
+    job = ScrapeJob(
+        type="relabel", status="queued", params={"material_ids": [material.id]}
+    )
+    s.add(job); s.commit()
+    mid, jid = material.id, job.id
+    s.close()
+
+    monkeypatch.setattr(
+        labeljob, "label_material",
+        lambda *args: (_ for _ in ()).throw(RuntimeError("provider down")),
+    )
+    labeljob.run_relabel_job(jid, [mid])
+
+    s = get_session()
+    saved = s.query(MaterialTag).filter_by(material_id=mid).all()
+    assert {tag.tag_value_id for tag in saved} == {ai_value.id, human_value.id}
+    assert s.get(ScrapeJob, jid).status == "failed"
+    s.close()
+
+
+def test_relabel_success_replaces_only_ai_tags(tmp_path, monkeypatch):
+    monkeypatch.setattr("sidecar.config.DB_PATH", tmp_path / "t.db")
+    monkeypatch.setattr("sidecar.config.MEDIA_DIR", tmp_path / "media")
+    seed.seed_taxonomy()
+    imp.import_folder(Path(__file__).parent / "fixtures" / "import_root")
+
+    from sidecar.db.models import Material, MaterialTag, ScrapeJob, TagValue
+    from sidecar.db.session import get_session
+    s = get_session()
+    material = s.query(Material).first()
+    old_ai = s.query(TagValue).filter_by(value="风景震撼").one()
+    new_ai = s.query(TagValue).filter_by(value="价格透明").one()
+    human = s.query(TagValue).filter_by(value="避坑攻略").one()
+    s.add_all([
+        MaterialTag(
+            material_id=material.id, tag_value_id=old_ai.id,
+            source="ai_text", confidence=0.9,
+        ),
+        MaterialTag(
+            material_id=material.id, tag_value_id=human.id,
+            source="human", confirmed_by_human=True,
+        ),
+    ])
+    job = ScrapeJob(
+        type="relabel", status="queued", params={"material_ids": [material.id]}
+    )
+    s.add(job); s.commit()
+    mid, jid = material.id, job.id
+    ids = old_ai.id, new_ai.id, human.id
+    s.close()
+
+    monkeypatch.setattr(labeljob, "label_material", lambda *args: [{
+        "dimension": "content_type", "value": "价格透明",
+        "confidence": 0.8, "out_of_taxonomy": False, "source": "ai_text",
+    }])
+    labeljob.run_relabel_job(jid, [mid])
+
+    s = get_session()
+    saved = s.query(MaterialTag).filter_by(material_id=mid).all()
+    assert {tag.tag_value_id for tag in saved} == {ids[1], ids[2]}
+    assert s.get(ScrapeJob, jid).status == "done"
+    s.close()
+
+
+def test_label_batch_skips_materials_with_ai_tags(tmp_path, monkeypatch):
+    monkeypatch.setattr("sidecar.config.DB_PATH", tmp_path / "t.db")
+    monkeypatch.setattr("sidecar.config.MEDIA_DIR", tmp_path / "media")
+    seed.seed_taxonomy()
+    imp.import_folder(Path(__file__).parent / "fixtures" / "import_root")
+
+    from sidecar.db.models import Material, MaterialTag, ScrapeJob, TagValue
+    from sidecar.db.session import get_session
+    s = get_session()
+    material = s.query(Material).first()
+    value = s.query(TagValue).first()
+    s.add(MaterialTag(
+        material_id=material.id, tag_value_id=value.id, source="ai_text"
+    ))
+    job = ScrapeJob(type="label_batch", status="queued", params={})
+    s.add(job); s.commit()
+    jid = job.id
+    s.close()
+
+    calls = []
+    monkeypatch.setattr(
+        labeljob, "label_material", lambda *args: calls.append(args) or []
+    )
+    labeljob.run_label_job(jid)
+
+    s = get_session()
+    assert calls == []
+    assert s.get(ScrapeJob, jid).result_summary == {"labeled": 0, "total": 0}
+    s.close()

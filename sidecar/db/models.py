@@ -150,6 +150,9 @@ class QuestionCluster(Base):
 
 class Question(Base):
     __tablename__ = "question"
+    __table_args__ = (
+        UniqueConstraint("source_type", "source_ref", name="uq_question_source"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     normalized_text: Mapped[str] = mapped_column(Text, default="")
     raw_text: Mapped[str] = mapped_column(Text, default="")

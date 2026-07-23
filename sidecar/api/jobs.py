@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sidecar.db.session import get_db
-from sidecar.db.models import ScrapeJob, JobLog
+from sidecar.db.models import Question, ScrapeJob, JobLog
 from sidecar.jobs.queue import submit
 from sidecar.jobs.label import run_label_job, run_relabel_job
 from sidecar.jobs.question_pool import run_question_pool_job, run_question_pool_incremental
@@ -154,6 +154,16 @@ def trigger_question_pool(
     body: QuestionPoolIn | None = None, s: Session = Depends(get_db)
 ):
     mode = (body.mode if body else "full") or "full"
+    if mode not in ("full", "incremental"):
+        raise HTTPException(400, "mode must be full or incremental")
+    active = s.query(ScrapeJob).filter(
+        ScrapeJob.type == "question_pool",
+        ScrapeJob.status.in_(["queued", "running"]),
+    ).first()
+    if active:
+        raise HTTPException(409, f"问题池任务 {active.id} 尚未完成")
+    if mode == "full" and s.query(Question).count() > 0:
+        raise HTTPException(409, "问题池已有数据，请使用增量更新")
     job = ScrapeJob(type="question_pool", status="queued", params={"mode": mode})
     s.add(job); s.commit(); s.refresh(job)
     if mode == "incremental":

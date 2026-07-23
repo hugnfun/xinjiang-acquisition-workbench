@@ -46,3 +46,34 @@ def test_run_question_pool_job(tmp_path, monkeypatch):
     assert all(q.cluster_id is not None for q in qs)
     # 簇有 name
     assert any(c.name for c in clusters)
+    from sidecar.db.models import Comment
+    assert all(
+        c.question_status == "question"
+        for c in s2.query(Comment).filter_by(is_reply=False).all()
+    )
+
+
+def test_cold_start_cannot_run_twice(tmp_path, monkeypatch):
+    _setup(tmp_path, monkeypatch)
+    from sidecar.db.session import get_session
+    from sidecar.db.models import Question, ScrapeJob
+    s = get_session()
+    s.add(Question(
+        normalized_text="已有", raw_text="已有",
+        source_ref=1, source_type="comment",
+    ))
+    job = ScrapeJob(type="question_pool", status="queued", params={"mode": "full"})
+    s.add(job); s.commit()
+    jid = job.id
+    s.close()
+
+    called = []
+    monkeypatch.setattr(
+        qp.tc, "filter_questions", lambda payload: called.append(payload) or []
+    )
+    qp.run_question_pool_job(jid)
+    s = get_session()
+    assert s.get(ScrapeJob, jid).status == "failed"
+    assert "不可重复" in s.get(ScrapeJob, jid).error
+    assert called == []
+    s.close()

@@ -402,3 +402,16 @@ def test_job_detail_has_progress(tmp_path, monkeypatch):
     assert r.status_code == 200
     assert r.json()["progress"] == 5
     assert r.json()["progress_total"] == 10
+
+
+def test_full_question_pool_rejected_when_questions_exist(tmp_path, monkeypatch):
+    client = _setup(tmp_path, monkeypatch)
+    s = get_session()
+    s.add(Question(
+        normalized_text="已有问题", raw_text="已有问题",
+        source_ref=999, source_type="comment",
+    ))
+    s.commit()
+    s.close()
+    r = client.post("/jobs/question-pool", json={"mode": "full"})
+    assert r.status_code == 409
