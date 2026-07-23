@@ -15,7 +15,7 @@ def _setup(tmp_path, monkeypatch):
     monkeypatch.setattr("sidecar.config.DB_PATH", tmp_path / "t.db")
     monkeypatch.setattr("sidecar.config.MEDIA_DIR", tmp_path / "media")
     # Prevent background jobs from actually running (they'd call LLM/opencli APIs)
-    monkeypatch.setattr("sidecar.api.jobs.submit", lambda coro: None)
+    monkeypatch.setattr("sidecar.api.jobs.submit", lambda *args, **kwargs: None)
     seed.seed_taxonomy()
     imp.import_folder(Path(__file__).parent / "fixtures" / "import_root")
     return TestClient(create_app())
@@ -342,6 +342,44 @@ def test_retry_non_failed_400(tmp_path, monkeypatch):
     s.close()
     r = client.post(f"/jobs/{jid}/retry")
     assert r.status_code == 400
+
+
+def test_cancel_queued_job(tmp_path, monkeypatch):
+    client = _setup(tmp_path, monkeypatch)
+    s = get_session()
+    job = ScrapeJob(type="report", status="queued", params={})
+    s.add(job); s.commit(); s.refresh(job)
+    jid = job.id
+    s.close()
+    r = client.post(f"/jobs/{jid}/cancel")
+    assert r.status_code == 200
+    s = get_session()
+    saved = s.get(ScrapeJob, jid)
+    assert saved.status == "cancelled"
+    assert saved.finished_at is not None
+    s.close()
+
+
+def test_retry_synthesis_dispatches_again(tmp_path, monkeypatch):
+    client = _setup(tmp_path, monkeypatch)
+    calls = []
+    monkeypatch.setattr(
+        "sidecar.api.jobs.submit",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+    s = get_session()
+    job = ScrapeJob(
+        type="synthesis", status="failed",
+        params={"material_ids": [1], "types": ["title"]},
+        error="provider error",
+    )
+    s.add(job); s.commit(); s.refresh(job)
+    jid = job.id
+    s.close()
+    r = client.post(f"/jobs/{jid}/retry")
+    assert r.status_code == 200
+    assert calls and calls[0][0][0] == jid
+    assert calls[0][0][2:] == ([1], ["title"], jid)
 
 
 def test_jobs_list_has_progress(tmp_path, monkeypatch):

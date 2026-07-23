@@ -8,6 +8,7 @@ from sidecar.db.session import session_scope
 from sidecar.db.models import ScrapeJob, JobLog
 from sidecar.opencli import runner
 from sidecar.importers.note_importer import insert_note, note_id_from_url
+from sidecar.jobs.queue import cancellation_checkpoint
 from sidecar import config
 
 
@@ -31,11 +32,15 @@ def run_scrape_job(job_id: int, keyword: str, limit: int = 20):
     total = 0
     try:
         results = runner.search(keyword, limit)
+        if cancellation_checkpoint(job_id):
+            return
         total = len(results)
         _set_job(job_id, progress_total=total)
         _log(job_id, f"搜索到 {total} 条结果")
         base = config.MEDIA_DIR / "scrapes" / str(job_id)
         for r in results:
+            if cancellation_checkpoint(job_id):
+                return
             url = r.get("url")
             if not url:
                 continue
@@ -87,6 +92,8 @@ def run_scrape_note_job(job_id: int, url: str):
         folder.mkdir(parents=True, exist_ok=True)
         _log(job_id, f"下载笔记内容 + 图片")
         runner.download(url, str(folder))
+        if cancellation_checkpoint(job_id):
+            return
         _set_job(job_id, progress=1)
 
         item = {
@@ -130,6 +137,8 @@ def run_scrape_user_job(job_id: int, url: str, limit: int = 20):
     total = 0
     try:
         results = runner.user_notes(url)
+        if cancellation_checkpoint(job_id):
+            return
         if limit and len(results) > limit:
             results = results[:limit]
         total = len(results)
@@ -137,6 +146,8 @@ def run_scrape_user_job(job_id: int, url: str, limit: int = 20):
         _log(job_id, f"用户主页 {total} 条笔记")
         base = config.MEDIA_DIR / "scrapes" / str(job_id)
         for r in results:
+            if cancellation_checkpoint(job_id):
+                return
             url2 = r.get("url")
             if not url2:
                 continue

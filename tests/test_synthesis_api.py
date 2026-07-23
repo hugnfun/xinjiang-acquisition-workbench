@@ -45,3 +45,23 @@ def test_dislike_asset(tmp_path, monkeypatch):
     assert r.status_code == 200
     s2 = get_session()
     assert s2.query(Asset).get(aid).disliked is True
+
+
+def test_extract_uses_job_queue(tmp_path, monkeypatch):
+    client = _setup(tmp_path, monkeypatch)
+    calls = []
+    monkeypatch.setattr(
+        "sidecar.api.synthesis.submit",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+    s = get_session()
+    mid = s.query(Asset).count() + 1
+    s.close()
+    r = client.post(
+        "/synthesis/extract",
+        json={"material_ids": [mid], "types": ["title"]},
+    )
+    assert r.status_code == 200
+    jid = r.json()["job_id"]
+    assert calls and calls[0][0][0] == jid
+    assert calls[0][0][2:] == ([mid], ["title"], jid)

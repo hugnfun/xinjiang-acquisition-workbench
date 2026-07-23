@@ -5,7 +5,6 @@ from sidecar.db.session import get_db
 from sidecar.db.models import Asset, ScrapeJob
 from sidecar.jobs.queue import submit
 from sidecar.jobs.synthesis import run_synthesis
-import asyncio
 
 router = APIRouter()
 
@@ -17,9 +16,7 @@ class ExtractIn(BaseModel):
 def extract(body: ExtractIn, s: Session = Depends(get_db)):
     job = ScrapeJob(type="synthesis", status="queued", params={"material_ids": body.material_ids, "types": body.types})
     s.add(job); s.commit(); s.refresh(job)
-    def _run():
-        run_synthesis(body.material_ids, body.types, job_id=job.id)
-    submit(asyncio.to_thread(_run))
+    submit(job.id, run_synthesis, body.material_ids, body.types, job.id)
     return {"job_id": job.id}
 
 @router.get("/assets")

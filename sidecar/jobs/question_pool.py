@@ -6,6 +6,7 @@ from sidecar.db.models import (Comment, Question, QuestionCluster, ScrapeJob,
 from sidecar.llm import task_client as tc
 from sidecar.llm import embedding as emb
 from sidecar.cluster.cosine import cluster_by_similarity
+from sidecar.jobs.queue import cancellation_checkpoint
 from sidecar import config
 
 BATCH = 20
@@ -46,6 +47,8 @@ def run_question_pool_job(job_id: int):
         _log(job_id, f"待过滤评论 {len(comment_data)} 条")
         questions_data = []
         for batch in _batched(comment_data, BATCH):
+            if cancellation_checkpoint(job_id):
+                return
             non_empty = [(cid, txt) for cid, txt in batch if txt]
             payload = [{"raw": txt} for cid, txt in non_empty]
             if not payload:
@@ -67,6 +70,8 @@ def run_question_pool_job(job_id: int):
 
         # Stage 2: 归一化（无 session）
         for batch in _batched(questions_data, BATCH):
+            if cancellation_checkpoint(job_id):
+                return
             try:
                 normed = tc.normalize_questions([{"raw": q["raw"]} for q in batch])
             except Exception as e:
@@ -80,6 +85,8 @@ def run_question_pool_job(job_id: int):
 
         # Stage 3: embedding（无 session）
         texts = [q["normalized"] for q in questions_data]
+        if cancellation_checkpoint(job_id):
+            return
         try:
             mat = emb.embed_batch(texts)
         except Exception as e:
@@ -115,6 +122,8 @@ def run_question_pool_job(job_id: int):
 
         # Stage 5: 命名（每簇：短 session 取样本→无 session 跑 LLM→短 session 写名）
         for cid in cluster_id_map.values():
+            if cancellation_checkpoint(job_id):
+                return
             with session_scope() as s:
                 samples = [q.raw_text
                            for q in s.query(Question).filter_by(cluster_id=cid).limit(5).all()]
@@ -185,6 +194,8 @@ def run_question_pool_incremental(job_id: int):
         # 2. 过滤 + 归一化 + embedding（同全量，但只对新评论）
         questions_data = []
         for batch in _batched(comment_data, BATCH):
+            if cancellation_checkpoint(job_id):
+                return
             non_empty = [(cid, txt) for cid, txt in batch if txt]
             payload = [{"raw": txt} for cid, txt in non_empty]
             if not payload:
@@ -204,6 +215,8 @@ def run_question_pool_incremental(job_id: int):
             _log(job_id, "新评论中无问题，完成")
             return
         for batch in _batched(questions_data, BATCH):
+            if cancellation_checkpoint(job_id):
+                return
             try:
                 normed = tc.normalize_questions([{"raw": q["raw"]} for q in batch])
             except Exception as e:
@@ -214,6 +227,8 @@ def run_question_pool_incremental(job_id: int):
         for q in questions_data:
             q.setdefault("normalized", q["raw"])
         try:
+            if cancellation_checkpoint(job_id):
+                return
             mat = emb.embed_batch([q["normalized"] for q in questions_data])
         except Exception as e:
             _set_job(job_id, status="failed", error=f"embedding 失败: {e}",
@@ -257,6 +272,8 @@ def run_question_pool_incremental(job_id: int):
 
         # 5. 只命名新建簇（既有簇名不动，省 MiniMax）
         for cid in new_cluster_ids:
+            if cancellation_checkpoint(job_id):
+                return
             with session_scope() as s:
                 samples = [q.raw_text
                            for q in s.query(Question).filter_by(cluster_id=cid).limit(5).all()]

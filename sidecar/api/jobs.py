@@ -1,4 +1,4 @@
-import asyncio
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -9,6 +9,7 @@ from sidecar.jobs.label import run_label_job, run_relabel_job
 from sidecar.jobs.question_pool import run_question_pool_job, run_question_pool_incremental
 from sidecar.jobs.scrape import run_scrape_job, run_scrape_note_job, run_scrape_user_job
 from sidecar.jobs.report import run_report_job
+from sidecar.jobs.synthesis import run_synthesis
 
 router = APIRouter()
 
@@ -23,6 +24,7 @@ def list_jobs(limit: int = 50, s: Session = Depends(get_db)):
         "finished_at": j.finished_at.isoformat() if j.finished_at else None,
         "error": j.error,
         "progress": j.progress, "progress_total": j.progress_total,
+        "cancel_requested": j.cancel_requested,
     } for j in jobs]
 
 
@@ -36,6 +38,7 @@ def get_job(jid: int, s: Session = Depends(get_db)):
         "id": j.id, "type": j.type, "status": j.status,
         "params": j.params, "result_summary": j.result_summary, "error": j.error,
         "progress": j.progress, "progress_total": j.progress_total,
+        "cancel_requested": j.cancel_requested,
         "logs": [{"level": l.level, "message": l.message,
                   "created_at": l.created_at.isoformat() if l.created_at else None}
                  for l in logs],
@@ -53,42 +56,78 @@ def retry_job(jid: int, s: Session = Depends(get_db)):
     j.status = "queued"
     j.error = None
     j.progress = 0
+    j.progress_total = 0
+    j.cancel_requested = False
+    j.result_summary = None
+    j.started_at = None
+    j.finished_at = None
     s.commit()
-    _dispatch(s, j)
+    _dispatch(j)
     return {"job_id": j.id}
 
 
-def _dispatch(s, job: ScrapeJob):
+def _dispatch(job: ScrapeJob):
     """根据 job.type 和 params 重新提交执行。"""
     jid = job.id
     p = job.params or {}
     t = job.type
     if t == "label_batch":
-        submit(asyncio.to_thread(run_label_job, jid))
+        submit(jid, run_label_job, jid)
     elif t == "relabel":
-        submit(asyncio.to_thread(run_relabel_job, jid, p.get("material_ids", [])))
+        submit(jid, run_relabel_job, jid, p.get("material_ids", []))
     elif t == "question_pool":
         if p.get("mode") == "incremental":
-            submit(asyncio.to_thread(run_question_pool_incremental, jid))
+            submit(jid, run_question_pool_incremental, jid)
         else:
-            submit(asyncio.to_thread(run_question_pool_job, jid))
+            submit(jid, run_question_pool_job, jid)
     elif t == "report":
-        submit(asyncio.to_thread(run_report_job, jid))
+        submit(jid, run_report_job, jid)
+    elif t == "synthesis":
+        submit(
+            jid, run_synthesis, p.get("material_ids", []),
+            p.get("types", []), jid,
+        )
     elif t == "scrape":
         mode = p.get("mode", "keyword")
         if mode == "note":
-            submit(asyncio.to_thread(run_scrape_note_job, jid, p.get("url", "")))
+            submit(jid, run_scrape_note_job, jid, p.get("url", ""))
         elif mode == "user":
-            submit(asyncio.to_thread(run_scrape_user_job, jid, p.get("url", ""), p.get("limit", 20)))
+            submit(
+                jid, run_scrape_user_job, jid, p.get("url", ""),
+                p.get("limit", 20),
+            )
         else:
-            submit(asyncio.to_thread(run_scrape_job, jid, p.get("keyword", ""), p.get("limit", 20)))
+            submit(
+                jid, run_scrape_job, jid, p.get("keyword", ""),
+                p.get("limit", 20),
+            )
+    else:
+        raise HTTPException(400, f"unsupported job type: {t}")
+
+
+@router.post("/jobs/{jid}/cancel")
+def cancel_job(jid: int, s: Session = Depends(get_db)):
+    job = s.get(ScrapeJob, jid)
+    if not job:
+        raise HTTPException(404)
+    if job.status == "queued":
+        job.status = "cancelled"
+        job.finished_at = datetime.utcnow()
+    elif job.status == "running":
+        job.cancel_requested = True
+    else:
+        raise HTTPException(
+            400, f"job status is {job.status}, only queued/running can cancel"
+        )
+    s.commit()
+    return {"job_id": job.id, "status": job.status}
 
 
 @router.post("/jobs/label")
 def trigger_label(s: Session = Depends(get_db)):
     job = ScrapeJob(type="label_batch", status="queued", params={})
     s.add(job); s.commit(); s.refresh(job)
-    submit(asyncio.to_thread(run_label_job, job.id))
+    submit(job.id, run_label_job, job.id)
     return {"job_id": job.id}
 
 
@@ -102,7 +141,7 @@ def trigger_relabel(body: RelabelIn, s: Session = Depends(get_db)):
     job = ScrapeJob(type="relabel", status="queued",
                     params={"material_ids": body.material_ids})
     s.add(job); s.commit(); s.refresh(job)
-    submit(asyncio.to_thread(run_relabel_job, job.id, body.material_ids))
+    submit(job.id, run_relabel_job, job.id, body.material_ids)
     return {"job_id": job.id}
 
 
@@ -118,9 +157,9 @@ def trigger_question_pool(
     job = ScrapeJob(type="question_pool", status="queued", params={"mode": mode})
     s.add(job); s.commit(); s.refresh(job)
     if mode == "incremental":
-        submit(asyncio.to_thread(run_question_pool_incremental, job.id))
+        submit(job.id, run_question_pool_incremental, job.id)
     else:
-        submit(asyncio.to_thread(run_question_pool_job, job.id))
+        submit(job.id, run_question_pool_job, job.id)
     return {"job_id": job.id}
 
 
@@ -128,7 +167,7 @@ def trigger_question_pool(
 def trigger_report(s: Session = Depends(get_db)):
     job = ScrapeJob(type="report", status="queued", params={})
     s.add(job); s.commit(); s.refresh(job)
-    submit(asyncio.to_thread(run_report_job, job.id))
+    submit(job.id, run_report_job, job.id)
     return {"job_id": job.id}
 
 
@@ -149,19 +188,19 @@ def trigger_scrape(body: ScrapeIn, s: Session = Depends(get_db)):
         params = {"mode": "note", "url": body.url}
         job = ScrapeJob(type="scrape", status="queued", params=params)
         s.add(job); s.commit(); s.refresh(job)
-        submit(asyncio.to_thread(run_scrape_note_job, job.id, body.url))
+        submit(job.id, run_scrape_note_job, job.id, body.url)
     elif mode == "user":
         if not body.url:
             raise HTTPException(400, "user mode requires url")
         params = {"mode": "user", "url": body.url, "limit": body.limit}
         job = ScrapeJob(type="scrape", status="queued", params=params)
         s.add(job); s.commit(); s.refresh(job)
-        submit(asyncio.to_thread(run_scrape_user_job, job.id, body.url, body.limit))
+        submit(job.id, run_scrape_user_job, job.id, body.url, body.limit)
     else:
         if not body.keyword:
             raise HTTPException(400, "keyword mode requires keyword")
         params = {"mode": "keyword", "keyword": body.keyword, "limit": body.limit}
         job = ScrapeJob(type="scrape", status="queued", params=params)
         s.add(job); s.commit(); s.refresh(job)
-        submit(asyncio.to_thread(run_scrape_job, job.id, body.keyword, body.limit))
+        submit(job.id, run_scrape_job, job.id, body.keyword, body.limit)
     return {"job_id": job.id}

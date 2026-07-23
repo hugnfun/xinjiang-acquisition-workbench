@@ -7,6 +7,7 @@ from datetime import datetime
 from sidecar.db.session import session_scope
 from sidecar.db.models import ScrapeJob, JobLog, QuestionCluster, Question
 from sidecar.llm import task_client as tc
+from sidecar.jobs.queue import cancellation_checkpoint
 
 
 def _log(job_id, msg, level="info"):
@@ -25,6 +26,8 @@ def run_report_job(job_id: int):
     _set_job(job_id, status="running", started_at=datetime.utcnow())
     _log(job_id, "生成问题池周报")
     try:
+        if cancellation_checkpoint(job_id):
+            return
         with session_scope() as s:
             clusters = (s.query(QuestionCluster)
                        .order_by(QuestionCluster.question_count.desc()).limit(15).all())
@@ -37,6 +40,8 @@ def run_report_job(job_id: int):
                  "本周用户最关心的话题 top3、以及 2-3 个值得做内容的方向。中文，300 字内。")
         user = "问题池热点簇：\n" + "\n".join(lines) if lines else "问题池为空"
         report = tc.chat_json(system, user)  # free-text，无需 JSON 解析
+        if cancellation_checkpoint(job_id):
+            return
         _set_job(job_id, status="done",
                  result_summary={"report": (report or "").strip()[:2000],
                                  "clusters_summarized": len(lines)},

@@ -63,6 +63,11 @@ export default function Jobs() {
     catch (e: any) { setErr(e?.message || String(e)); }
   };
 
+  const cancel = async (id: number) => {
+    try { await api.cancelJob(id); refresh(); }
+    catch (e: any) { setErr(e?.message || String(e)); }
+  };
+
   const running = jobs.some(j => j.status === "running" || j.status === "queued");
 
   const toggle = async (id: number) => {
@@ -166,6 +171,11 @@ export default function Jobs() {
                   {/* 失败重试 (spec §5.5) */}
                   {(j.status === "failed" || j.status === "cancelled") && (
                     <button onClick={e => { e.stopPropagation(); retry(j.id); }} style={{ fontSize: 12, padding: "2px 8px", border: "1px solid #ccc", borderRadius: 3, cursor: "pointer" }}>重试</button>
+                  )}
+                  {(j.status === "queued" || j.status === "running") && (
+                    <button onClick={e => { e.stopPropagation(); cancel(j.id); }} style={{ fontSize: 12, padding: "2px 8px", border: "1px solid #ccc", borderRadius: 3, cursor: "pointer" }}>
+                      {j.status === "running" ? "请求取消" : "取消"}
+                    </button>
                   )}
                 </td>
                 <td style={{ padding: "4px 8px", color: "#b00020", fontSize: 12, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{j.error}</td>

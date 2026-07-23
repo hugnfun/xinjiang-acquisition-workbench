@@ -120,6 +120,8 @@ export const api = {
   getJobs: () => get<JobView[]>(`/jobs`),
   getJob: (id: number) => get<any>(`/jobs/${id}`),
   retryJob: (id: number) => post<{ job_id: number }>(`/jobs/${id}/retry`, {}),
+  cancelJob: (id: number) =>
+    post<{ job_id: number; status: string }>(`/jobs/${id}/cancel`, {}),
   triggerLabel: () => post<{ job_id: number }>(`/jobs/label`, {}),
   triggerRelabel: (material_ids: number[]) =>
     post<{ job_id: number }>(`/jobs/relabel`, { material_ids }),

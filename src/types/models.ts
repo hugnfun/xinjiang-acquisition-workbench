@@ -29,6 +29,7 @@ export interface JobView {
   created_at: string | null; started_at: string | null;
   finished_at: string | null; error: string | null;
   progress: number; progress_total: number;
+  cancel_requested: boolean;
 }
 export interface ClusterView {
   id: number; name: string; description: string; question_count: number;

@@ -3,6 +3,7 @@ from sidecar.db.session import session_scope
 from sidecar.db.models import (Material, MaterialTag, TagValue, TagDimension,
                                Asset, ScrapeJob)
 from sidecar.llm import task_client as tc
+from sidecar.jobs.queue import cancellation_checkpoint
 
 # 合成类型 → LLM 返回 dict 的键名
 TYPE_KEY = {
@@ -37,12 +38,16 @@ def _material_data(s, material_ids):
 def run_synthesis(material_ids: list[int], types: list[str], job_id: int | None = None):
     if not material_ids:
         raise ValueError("无素材")
+    if job_id and cancellation_checkpoint(job_id):
+        return 0
     # 短 session 读素材数据，MiniMax 调用期间不持有 session
     with session_scope() as s:
         mats = _material_data(s, material_ids)
     if not mats:
         raise ValueError("无素材")
     result = tc.synthesize(mats, types)  # 无 session 持有
+    if job_id and cancellation_checkpoint(job_id):
+        return 0
     written = 0
     with session_scope() as s:
         for t in types:

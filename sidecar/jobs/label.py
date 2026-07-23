@@ -4,6 +4,7 @@ from sidecar.db.session import session_scope
 from sidecar.db.models import (Material, MaterialTag, TagValue, TagDimension,
                                TagSuggestion, ScrapeJob, JobLog)
 from sidecar.llm.labeling import label_material
+from sidecar.jobs.queue import cancellation_checkpoint
 from sidecar import config
 
 CONFIDENCE_THRESHOLD = 0.6
@@ -76,6 +77,8 @@ def run_label_job(job_id: int):
     last_error = ""
     try:
         for md in mat_data:
+            if cancellation_checkpoint(job_id):
+                return
             image_paths = [config.MEDIA_DIR / p for p in md["images"]]
             try:
                 labels = label_material(md["title"], md["content"], image_paths, taxonomy)
@@ -138,6 +141,8 @@ def run_relabel_job(job_id: int, material_ids: list[int]):
     last_error = ""
     try:
         for md in mats:
+            if cancellation_checkpoint(job_id):
+                return
             image_paths = [config.MEDIA_DIR / p for p in md["images"]]
             try:
                 labels = label_material(md["title"], md["content"], image_paths, taxonomy)
