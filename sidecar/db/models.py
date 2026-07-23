@@ -171,4 +171,8 @@ class Asset(Base):
     derived_from: Mapped[list] = mapped_column(JSON, default=list)  # [material_id,...]
     tags: Mapped[list] = mapped_column(JSON, default=list)
     disliked: Mapped[bool] = mapped_column(Boolean, default=False)
+    # spec §5.4 合成质量状态：pending|minor_edit|ready|adopted|published
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    quality: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 人工评分 1-5
+    reject_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

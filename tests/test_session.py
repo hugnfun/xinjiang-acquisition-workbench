@@ -134,7 +134,7 @@ def test_legacy_database_is_migrated(tmp_path, monkeypatch):
         }
         assert {"question_status", "question_processed_at"} <= comment_columns
         assert {"progress", "progress_total", "cancel_requested"} <= job_columns
-        assert migrated.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0002_question_idempotency"
+        assert migrated.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0003_asset_quality"
 
 
 def test_material_identity_is_unique(tmp_path, monkeypatch):

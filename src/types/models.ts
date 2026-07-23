@@ -45,6 +45,7 @@ export interface QuestionView {
 export interface AssetView {
   id: number; type: string; text: string;
   derived_from: number[]; tags: string[]; disliked: boolean;
+  status: string; quality: number | null; reject_reason: string | null;
 }
 
 export interface WorkVaultScanItem {

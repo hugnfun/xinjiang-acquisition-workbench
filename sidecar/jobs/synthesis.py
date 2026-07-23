@@ -60,8 +60,13 @@ def run_synthesis(material_ids: list[int], types: list[str], job_id: int | None 
             for text in result.get(key, []):
                 if not text or not text.strip():
                     continue
+                clean = text.strip()
+                # 去重：同类型同文本已存在则跳过
+                exists = s.query(Asset).filter_by(type=t, text=clean).first()
+                if exists:
+                    continue
                 s.add(Asset(
-                    type=t, text=text.strip(),
+                    type=t, text=clean,
                     derived_from=list(material_ids),
                     tags=asset_tags,
                     disliked=False,

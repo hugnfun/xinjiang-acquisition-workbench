@@ -3,6 +3,19 @@ import { api } from "../api/client";
 import type { AssetView } from "../types/models";
 import { getSelectedMaterialIds, clearMaterialSelection, onSelectionChange } from "../App";
 
+const STATUS_LABELS: Record<string, string> = {
+  pending: "待审", minor_edit: "小改可用", ready: "直接可用",
+  adopted: "已采用", published: "已发布",
+};
+const STATUS_COLORS: Record<string, string> = {
+  pending: "#fff3cd", minor_edit: "#e0f2fe", ready: "#d4edda",
+  adopted: "#d1e7dd", published: "#cfe2ff",
+};
+const STATUS_TEXT_COLORS: Record<string, string> = {
+  pending: "#856404", minor_edit: "#0369a1", ready: "#155724",
+  adopted: "#0f5132", published: "#084298",
+};
+
 const TYPES = [
   { key: "selling_point", label: "卖点" },
   { key: "hook", label: "钩子" },
@@ -20,13 +33,14 @@ export default function Synthesis({ onNavigateToMaterial }: {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editText, setEditText] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
   const refreshTimer = useRef<number | null>(null);
   const tabRef = useRef(tab);
 
   useEffect(() => {
     tabRef.current = tab;
     let active = true;
-    api.listAssets(tab).then(list => { if (active) setAssets(list); });
+    api.listAssets(tab, statusFilter).then(list => { if (active) setAssets(list); });
     return () => { active = false; };
   }, [tab]);
 
@@ -40,7 +54,7 @@ export default function Synthesis({ onNavigateToMaterial }: {
     if (refreshTimer.current) window.clearTimeout(refreshTimer.current);
   }, []);
 
-  const refresh = () => api.listAssets(tabRef.current).then(setAssets);
+  const refresh = () => api.listAssets(tabRef.current, statusFilter).then(setAssets);
 
   const pollJob = (jobId: number, attempt = 0) => {
     api.getJob(jobId).then(job => {
@@ -105,6 +119,13 @@ export default function Synthesis({ onNavigateToMaterial }: {
               fontWeight: tab === t.key ? 600 : 400, fontSize: 14 }}>{t.label}</button>
         ))}
       </div>
+      <div style={{ marginBottom: 12, display: "flex", gap: 8, alignItems: "center" }}>
+        <select value={statusFilter ?? ""} onChange={e => { setStatusFilter(e.target.value || undefined); }} style={{ padding: "3px 8px", border: "1px solid #ccc", borderRadius: 4 }}>
+          <option value="">全部状态</option>
+          {Object.entries(STATUS_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+        </select>
+        <span style={{ fontSize: 13, color: "#888" }}>{assets.length} 条</span>
+      </div>
       {/* 顶部「让 AI 从选中素材里提炼新一批」按钮 (spec §5.4) */}
       <div style={{ marginBottom: 16, padding: 12, background: "#f9f9f9", borderRadius: 6, display: "flex", alignItems: "center", gap: 12 }}>
         <span style={{ fontSize: 14 }}>
@@ -132,6 +153,16 @@ export default function Synthesis({ onNavigateToMaterial }: {
           ) : (
             <div style={{ marginBottom: 6, lineHeight: 1.6 }}>{a.text}</div>
           )}
+          {/* 质量状态 */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+            <span style={{ fontSize: 12, padding: "1px 8px", borderRadius: 3, background: STATUS_COLORS[a.status] || "#e5e7eb", color: STATUS_TEXT_COLORS[a.status] || "#555" }}>
+              {STATUS_LABELS[a.status] || a.status}
+            </span>
+            <select value={a.status} onChange={e => { api.updateAsset(a.id, { status: e.target.value }).then(refresh); }}
+              style={{ fontSize: 12, padding: "1px 4px", border: "1px solid #ddd", borderRadius: 3 }}>
+              {Object.entries(STATUS_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          </div>
           {/* 适用标签 chips (spec §5.4) */}
           {a.tags.length > 0 && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 4 }}>

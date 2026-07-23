@@ -109,9 +109,11 @@ export const api = {
   // ── 合成库 ──
   extractAssets: (material_ids: number[], types: string[]) =>
     post<{ job_id: number }>('/synthesis/extract', { material_ids, types }),
-  listAssets: (type?: string) =>
-    get<AssetView[]>(`/assets${type ? '?type=' + type : ''}`),
-  updateAsset: (aid: number, body: { text?: string; disliked?: boolean }) =>
+  listAssets: (type?: string, status?: string) =>
+    get<AssetView[]>(`/assets${type ? '?type=' + type : ''}${type && status ? '&' : '?'}${status ? 'status=' + status : ''}`),
+  listAssetsByStatus: (status: string) =>
+    get<AssetView[]>(`/assets?status=${status}`),
+  updateAsset: (aid: number, body: { text?: string; disliked?: boolean; status?: string; quality?: number; reject_reason?: string }) =>
     put(`/assets/${aid}`, body),
   deleteAsset: async (aid: number) => {
     const r = await fetch(`${await baseUrl()}/assets/${aid}`, { method: 'DELETE' });
