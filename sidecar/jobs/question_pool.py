@@ -9,7 +9,7 @@ from sidecar.cluster.cosine import cluster_by_similarity
 from sidecar.jobs.queue import cancellation_checkpoint
 from sidecar import config
 
-BATCH = 20
+BATCH = 50
 
 
 def _log(job_id, msg, level="info"):
