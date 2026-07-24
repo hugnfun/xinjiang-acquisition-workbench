@@ -29,11 +29,11 @@ def _parse_labels(text: str) -> list:
 def _get_text_client():
     if not config.TEXT_API_KEY:
         raise RuntimeError("DEEPSEEK_API_KEY 未设置")
-    return OpenAI(base_url=config.TEXT_API_BASE, api_key=config.TEXT_API_KEY)
+    return OpenAI(base_url=config.TEXT_API_BASE, api_key=config.TEXT_API_KEY, timeout=60, max_retries=3)
 
 
 def _get_vision_client():
-    return OpenAI(base_url=config.VISION_API_BASE, api_key=config.VISION_API_KEY)
+    return OpenAI(base_url=config.VISION_API_BASE, api_key=config.VISION_API_KEY, timeout=30, max_retries=2)
 
 
 def _build_taxonomy_prompt(taxonomy: list, focus_dims=None) -> str:

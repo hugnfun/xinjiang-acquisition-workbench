@@ -80,7 +80,7 @@ def _extract_toplevel_json(s: str) -> list[str]:
     return out
 
 def _get_client():
-    return OpenAI(base_url=config.TASK_API_BASE, api_key=config.TASK_API_KEY)
+    return OpenAI(base_url=config.TASK_API_BASE, api_key=config.TASK_API_KEY, timeout=60, max_retries=3)
 
 def chat_json(system: str, user: str) -> str:
     client = _get_client()
