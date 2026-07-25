@@ -372,6 +372,12 @@ def run_question_pool_incremental(job_id: int):
                     cid = cl.id
                     centroids[cid] = vec  # 新簇质心=首个向量
                     new_cluster_ids.append(cid)
+                # 跳过已入库的（防 UNIQUE constraint 冲突）
+                existing = s.query(Question).filter_by(
+                    source_type="comment", source_ref=q["comment_id"]
+                ).first()
+                if existing:
+                    continue
                 s.add(Question(
                     normalized_text=q["normalized"], raw_text=q["raw"],
                     source_ref=q["comment_id"], source_type="comment",
