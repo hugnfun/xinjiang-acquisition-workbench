@@ -3,7 +3,7 @@ from openai import OpenAI
 from sidecar import config
 
 def _get_client():
-    return OpenAI(base_url=config.EMBEDDING_API_BASE, api_key=config.EMBEDDING_API_KEY, timeout=30, max_retries=2)
+    return OpenAI(base_url=config.EMBEDDING_API_BASE, api_key=config.EMBEDDING_API_KEY, timeout=120, max_retries=2)
 
 def embed(text: str) -> np.ndarray:
     client = _get_client()
