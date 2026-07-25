@@ -156,11 +156,11 @@ def run_question_pool_job(job_id: int):
                 return
             try:
                 normed = tc.normalize_questions([{"raw": q["raw"]} for q in batch])
+                for q, n in zip(batch, normed):
+                    q["normalized"] = n.get("normalized", q["raw"])
             except Exception as e:
-                _log(job_id, f"归一化批次失败: {e}", "error")
-                continue
-            for q, n in zip(batch, normed):
-                q["normalized"] = n.get("normalized", q["raw"])
+                _log(job_id, f"归一化批次失败(用原文): {e}", "warning")
+                # 归一化失败不跳过，用 raw_text 兜底，embedding 聚类仍能工作
         for q in questions_data:
             q.setdefault("normalized", q["raw"])
         _log(job_id, "Stage2 归一化完成")
@@ -314,11 +314,11 @@ def run_question_pool_incremental(job_id: int):
                 return
             try:
                 normed = tc.normalize_questions([{"raw": q["raw"]} for q in batch])
+                for q, n in zip(batch, normed):
+                    q["normalized"] = n.get("normalized", q["raw"])
             except Exception as e:
-                _log(job_id, f"归一化批次失败: {e}", "error")
-                continue
-            for q, n in zip(batch, normed):
-                q["normalized"] = n.get("normalized", q["raw"])
+                _log(job_id, f"归一化批次失败(用原文): {e}", "warning")
+                # 归一化失败不跳过，用 raw_text 兜底，embedding 聚类仍能工作
         for q in questions_data:
             q.setdefault("normalized", q["raw"])
         try:
