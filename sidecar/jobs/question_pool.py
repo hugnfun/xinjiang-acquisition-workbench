@@ -70,9 +70,15 @@ def _mark_comments(comment_ids: list[int], status: str):
 
 
 def _filter_candidates(job_id: int, comment_data):
-    """过滤问题并持久化非问题游标；失败批次保持 pending 供重试。"""
+    """过滤问题并持久化非问题游标；失败批次保持 pending 供重试。
+
+    已标记为 question_pending 的评论（上次过滤判为问题但未完成后续阶段）
+    直接收集，不再重复调用 LLM。
+    """
     questions_data = []
     failed_batches = 0
+    # 分离待过滤(pending)和已过滤(question_pending)
+    to_filter = [(cid, txt) for cid, txt in comment_data]
     for batch in _batched(comment_data, BATCH):
         if cancellation_checkpoint(job_id):
             return None
@@ -96,14 +102,17 @@ def _filter_candidates(job_id: int, comment_data):
                 "error",
             )
         not_question_ids = []
+        question_ids = []
         for r, (cid, txt) in zip(results, non_empty):
             if r.get("is_question"):
                 questions_data.append({
                     "raw": r.get("raw", txt), "comment_id": cid
                 })
+                question_ids.append(cid)
             else:
                 not_question_ids.append(cid)
         _mark_comments(not_question_ids, "not_question")
+        _mark_comments(question_ids, "question_pending")
     return questions_data, failed_batches
 
 
@@ -273,7 +282,7 @@ def run_question_pool_incremental(job_id: int):
                 centroids[cl.id] = vecs.mean(axis=0)
             new_comments = s.query(Comment).filter(
                 Comment.is_reply == False,
-                Comment.question_status == "pending",
+                Comment.question_status.in_(["pending", "question_pending"]),
             ).all()
             comment_data = [(c.id, (c.text or "").strip()) for c in new_comments]
             processed = s.query(Comment).filter(
@@ -287,11 +296,24 @@ def run_question_pool_incremental(job_id: int):
             _log(job_id, "无新评论，完成")
             return
 
-        # 2. 过滤 + 归一化 + embedding（同全量，但只对新评论）
-        filtered = _filter_candidates(job_id, comment_data)
+        # 2. 过滤 + 归一化 + embedding
+        # 分离：pending 需要过滤，question_pending 直接收集
+        with session_scope() as s:
+            pending_ids = {c.id for c in s.query(Comment).filter(
+                Comment.is_reply == False, Comment.question_status == "pending"
+            ).all()}
+        to_filter = [(cid, txt) for cid, txt in comment_data if cid in pending_ids]
+        to_collect = [(cid, txt) for cid, txt in comment_data if cid not in pending_ids]
+        questions_data = [{"raw": txt, "comment_id": cid} for cid, txt in to_collect]
+        if to_collect:
+            _log(job_id, f"捡回 {len(to_collect)} 条上次未完成的问题")
+        filtered = _filter_candidates(job_id, to_filter)
         if filtered is None:
             return
-        questions_data, failed_filter_batches = filtered
+        new_questions, failed_filter_batches = filtered
+        questions_data.extend(new_questions)
+
+
         if not questions_data:
             if failed_filter_batches:
                 error = f"{failed_filter_batches} 个过滤批次失败，评论保留待重试"
