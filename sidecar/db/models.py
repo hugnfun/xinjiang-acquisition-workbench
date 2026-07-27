@@ -1,7 +1,7 @@
 from datetime import datetime
 from sqlalchemy import (
     String, Integer, Float, Boolean, Text, DateTime, ForeignKey, JSON,
-    UniqueConstraint,
+    UniqueConstraint, CheckConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -184,4 +184,100 @@ class Asset(Base):
     prompt_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
     model_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
     token_usage: Mapped[dict] = mapped_column(JSON, default=dict)  # {prompt_tokens, completion_tokens, total_tokens, cost}
+    source_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("scrape_job.id"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ContentExperiment(Base):
+    __tablename__ = "content_experiment"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft', 'published', 'archived')",
+            name="ck_content_experiment_status",
+        ),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    platform: Mapped[str] = mapped_column(String(32), default="xiaohongshu")
+    status: Mapped[str] = mapped_column(String(16), default="draft", index=True)
+    final_title: Mapped[str] = mapped_column(Text, default="")
+    final_body: Mapped[str] = mapped_column(Text, default="")
+    published_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    cluster_id: Mapped[int | None] = mapped_column(
+        ForeignKey("question_cluster.id", ondelete="SET NULL"),
+        nullable=True, index=True,
+    )
+    target_audience: Mapped[str | None] = mapped_column(Text, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+    asset_links: Mapped[list["ContentExperimentAsset"]] = relationship(
+        back_populates="experiment", cascade="all, delete-orphan",
+        order_by="ContentExperimentAsset.position",
+    )
+    metric_snapshots: Mapped[list["ExperimentMetricSnapshot"]] = relationship(
+        back_populates="experiment", cascade="all, delete-orphan",
+        order_by="ExperimentMetricSnapshot.measured_at",
+    )
+
+
+class ContentExperimentAsset(Base):
+    __tablename__ = "content_experiment_asset"
+    __table_args__ = (
+        UniqueConstraint(
+            "experiment_id", "asset_id",
+            name="uq_content_experiment_asset_pair",
+        ),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    experiment_id: Mapped[int] = mapped_column(
+        ForeignKey("content_experiment.id", ondelete="CASCADE"), index=True
+    )
+    asset_id: Mapped[int | None] = mapped_column(
+        ForeignKey("asset.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    role: Mapped[str] = mapped_column(String(32))
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    text_snapshot: Mapped[str] = mapped_column(Text, default="")
+    experiment: Mapped["ContentExperiment"] = relationship(
+        back_populates="asset_links"
+    )
+
+
+class ExperimentMetricSnapshot(Base):
+    __tablename__ = "experiment_metric_snapshot"
+    __table_args__ = tuple(
+        CheckConstraint(f"{name} >= 0", name=f"ck_metric_{name}_nonnegative")
+        for name in (
+            "views", "likes", "collects", "comments", "shares",
+            "inquiries", "qualified_leads", "wechat_adds", "quotes",
+            "orders", "revenue_cents",
+        )
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    experiment_id: Mapped[int] = mapped_column(
+        ForeignKey("content_experiment.id", ondelete="CASCADE"), index=True
+    )
+    measured_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, index=True
+    )
+    views: Mapped[int] = mapped_column(Integer, default=0)
+    likes: Mapped[int] = mapped_column(Integer, default=0)
+    collects: Mapped[int] = mapped_column(Integer, default=0)
+    comments: Mapped[int] = mapped_column(Integer, default=0)
+    shares: Mapped[int] = mapped_column(Integer, default=0)
+    inquiries: Mapped[int] = mapped_column(Integer, default=0)
+    qualified_leads: Mapped[int] = mapped_column(Integer, default=0)
+    wechat_adds: Mapped[int] = mapped_column(Integer, default=0)
+    quotes: Mapped[int] = mapped_column(Integer, default=0)
+    orders: Mapped[int] = mapped_column(Integer, default=0)
+    revenue_cents: Mapped[int] = mapped_column(Integer, default=0)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    experiment: Mapped["ContentExperiment"] = relationship(
+        back_populates="metric_snapshots"
+    )

@@ -36,13 +36,16 @@ def create_app() -> FastAPI:
     @app.get("/health")
     def health():
         return {"ok": True}
-    from sidecar.api import materials, tags, jobs, questions, synthesis, work_vault
+    from sidecar.api import (
+        materials, tags, jobs, questions, synthesis, work_vault, experiments,
+    )
     app.include_router(materials.router)
     app.include_router(tags.router)
     app.include_router(jobs.router)
     app.include_router(questions.router)
     app.include_router(synthesis.router)
     app.include_router(work_vault.router)
+    app.include_router(experiments.router)
     # 启动时清理僵尸 job：sidecar 重启后，之前 running/queued 的 job 永远不会
     # 完成（执行它们的进程已死），会把前端的"防重"逻辑卡死（按钮一直禁用）。
     # 统一标记为 failed。

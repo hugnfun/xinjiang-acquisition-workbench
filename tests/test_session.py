@@ -134,7 +134,17 @@ def test_legacy_database_is_migrated(tmp_path, monkeypatch):
         }
         assert {"question_status", "question_processed_at"} <= comment_columns
         assert {"progress", "progress_total", "cancel_requested"} <= job_columns
-        assert migrated.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0004_sprint3"
+        assert migrated.execute(text("SELECT version_num FROM alembic_version")).scalar() == "0005_experiments"
+        tables = {
+            row[0] for row in migrated.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table'")
+            )
+        }
+        assert {
+            "content_experiment",
+            "content_experiment_asset",
+            "experiment_metric_snapshot",
+        } <= tables
 
 
 def test_material_identity_is_unique(tmp_path, monkeypatch):
