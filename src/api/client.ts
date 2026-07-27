@@ -1,4 +1,8 @@
-import type { MaterialSummary, MaterialDetail, TagDimensionView, JobView, ClusterView, QuestionView, AssetView } from '../types/models';
+import type {
+  MaterialSummary, MaterialDetail, TagDimensionView, JobView, ClusterView,
+  QuestionView, AssetView, ContentExperiment, ExperimentAnalytics,
+  ExperimentMetricSnapshot,
+} from '../types/models';
 
 // Cached sidecar port. Resolved once via the `get_sidecar_port` Tauri command
 // (pull-based — the frontend asks for the port before its first fetch), which
@@ -109,8 +113,13 @@ export const api = {
   // ── 合成库 ──
   extractAssets: (material_ids: number[], types: string[]) =>
     post<{ job_id: number }>('/synthesis/extract', { material_ids, types }),
-  listAssets: (type?: string, status?: string) =>
-    get<AssetView[]>(`/assets${type ? '?type=' + type : ''}${type && status ? '&' : '?'}${status ? 'status=' + status : ''}`),
+  listAssets: (type?: string, status?: string) => {
+    const params = new URLSearchParams();
+    if (type) params.set('type', type);
+    if (status) params.set('status', status);
+    const query = params.toString();
+    return get<AssetView[]>(`/assets${query ? `?${query}` : ''}`);
+  },
   listAssetsByStatus: (status: string) =>
     get<AssetView[]>(`/assets?status=${status}`),
   updateAsset: (aid: number, body: { text?: string; disliked?: boolean; status?: string; quality?: number; reject_reason?: string; cluster_id?: number; target_audience?: string }) =>
@@ -121,6 +130,32 @@ export const api = {
     if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
     return r.json();
   },
+
+  // ── 内容实验 ──
+  listExperiments: (status?: string, clusterId?: number) => {
+    const params = new URLSearchParams();
+    if (status) params.set('status', status);
+    if (clusterId) params.set('cluster_id', String(clusterId));
+    return get<{ total: number; items: ContentExperiment[] }>(`/experiments?${params}`);
+  },
+  getExperiment: (id: number) =>
+    get<ContentExperiment>(`/experiments/${id}`),
+  createExperiment: (body: {
+    asset_ids: number[]; platform?: string; final_title: string; final_body: string;
+    cluster_id?: number | null; target_audience?: string; notes?: string;
+  }) => post<ContentExperiment>('/experiments', body),
+  updateExperiment: (id: number, body: Partial<{
+    asset_ids: number[]; status: string; platform: string;
+    final_title: string; final_body: string; published_url: string;
+    published_at: string; cluster_id: number | null;
+    target_audience: string; notes: string;
+  }>) => put<ContentExperiment>(`/experiments/${id}`, body),
+  addExperimentMetric: (id: number, body: Record<string, unknown>) =>
+    post<ExperimentMetricSnapshot>(`/experiments/${id}/metrics`, body),
+  updateExperimentMetric: (id: number, snapshotId: number, body: Record<string, unknown>) =>
+    put<ExperimentMetricSnapshot>(`/experiments/${id}/metrics/${snapshotId}`, body),
+  getExperimentAnalytics: (clusterId?: number) =>
+    get<ExperimentAnalytics>(`/experiments/analytics${clusterId ? `?cluster_id=${clusterId}` : ''}`),
 
   // ── 任务中心 ──
   getJobs: () => get<JobView[]>(`/jobs`),

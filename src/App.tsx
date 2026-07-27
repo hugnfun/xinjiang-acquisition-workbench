@@ -4,9 +4,10 @@ import Tags from './routes/Tags';
 import Jobs from './routes/Jobs';
 import Questions from './routes/Questions';
 import Synthesis from './routes/Synthesis';
+import Experiments from './routes/Experiments';
 import { api } from './api/client';
 
-type Tab = 'materials' | 'tags' | 'questions' | 'synthesis' | 'jobs';
+type Tab = 'materials' | 'tags' | 'questions' | 'synthesis' | 'experiments' | 'jobs';
 
 // spec §5.4: /materials 勾选的素材可在 /synthesis 批量提炼
 let _selectedMaterialIds: Set<number> = new Set();
@@ -28,11 +29,34 @@ export function onSelectionChange(fn: () => void) {
   return () => { const i = _listeners.indexOf(fn); if (i >= 0) _listeners.splice(i, 1); };
 }
 
+let _selectedAssetIds: Set<number> = new Set();
+const _assetListeners: (() => void)[] = [];
+export function getSelectedAssetIds(): number[] {
+  return [..._selectedAssetIds];
+}
+export function toggleAssetSelection(id: number) {
+  if (_selectedAssetIds.has(id)) _selectedAssetIds.delete(id);
+  else _selectedAssetIds.add(id);
+  _assetListeners.forEach(fn => fn());
+}
+export function clearAssetSelection() {
+  _selectedAssetIds.clear();
+  _assetListeners.forEach(fn => fn());
+}
+export function onAssetSelectionChange(fn: () => void) {
+  _assetListeners.push(fn);
+  return () => {
+    const i = _assetListeners.indexOf(fn);
+    if (i >= 0) _assetListeners.splice(i, 1);
+  };
+}
+
 const TABS: { key: Tab; label: string }[] = [
   { key: 'materials', label: '素材库' },
   { key: 'tags', label: '标签体系' },
   { key: 'questions', label: '问题池' },
   { key: 'synthesis', label: '合成库' },
+  { key: 'experiments', label: '内容实验' },
   { key: 'jobs', label: '任务中心' },
 ];
 
@@ -70,7 +94,9 @@ export default function App() {
         ) : tab === 'tags' ? <Tags /> :
           tab === 'questions' ? <Questions onNavigateToMaterial={navigateToMaterial} /> :
           tab === 'jobs' ? <Jobs /> :
-          <Synthesis onNavigateToMaterial={navigateToMaterial} />}
+          tab === 'experiments' ? <Experiments /> :
+          <Synthesis onNavigateToMaterial={navigateToMaterial}
+            onCreateExperiment={() => setTab('experiments')} />}
       </div>
     </div>
   );

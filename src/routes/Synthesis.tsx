@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import type { AssetView, ClusterView } from "../types/models";
-import { getSelectedMaterialIds, clearMaterialSelection, onSelectionChange } from "../App";
+import {
+  getSelectedMaterialIds, clearMaterialSelection, onSelectionChange,
+  getSelectedAssetIds, toggleAssetSelection, clearAssetSelection,
+  onAssetSelectionChange,
+} from "../App";
 
 const STATUS_LABELS: Record<string, string> = {
   pending: "待审", minor_edit: "小改可用", ready: "直接可用",
@@ -23,8 +27,17 @@ const TYPES = [
   { key: "title", label: "标题" },
 ];
 
-export default function Synthesis({ onNavigateToMaterial }: {
+export default function Synthesis({ onNavigateToMaterial, onCreateExperiment }: {
   onNavigateToMaterial?: (id: number) => void;
+  onCreateExperiment?: () => void;
+}) {
+  return <SynthesisContent onNavigateToMaterial={onNavigateToMaterial}
+    onCreateExperiment={onCreateExperiment} />;
+}
+
+function SynthesisContent({ onNavigateToMaterial, onCreateExperiment }: {
+  onNavigateToMaterial?: (id: number) => void;
+  onCreateExperiment?: () => void;
 }) {
   const [tab, setTab] = useState("selling_point");
   const [assets, setAssets] = useState<AssetView[]>([]);
@@ -35,6 +48,7 @@ export default function Synthesis({ onNavigateToMaterial }: {
   const [notice, setNotice] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
   const [clusters, setClusters] = useState<ClusterView[]>([]);
+  const [assetSelCount, setAssetSelCount] = useState(0);
   const refreshTimer = useRef<number | null>(null);
   const tabRef = useRef(tab);
 
@@ -43,13 +57,15 @@ export default function Synthesis({ onNavigateToMaterial }: {
     let active = true;
     api.listAssets(tab, statusFilter).then(list => { if (active) setAssets(list); });
     return () => { active = false; };
-  }, [tab]);
+  }, [tab, statusFilter]);
 
   useEffect(() => {
     api.getClusters().then(setClusters).catch(() => {});
     const unsub = onSelectionChange(() => setSelCount(getSelectedMaterialIds().length));
+    const unsubAssets = onAssetSelectionChange(() => setAssetSelCount(getSelectedAssetIds().length));
     setSelCount(getSelectedMaterialIds().length);
-    return unsub;
+    setAssetSelCount(getSelectedAssetIds().length);
+    return () => { unsub(); unsubAssets(); };
   }, []);
 
   useEffect(() => () => {
@@ -127,6 +143,16 @@ export default function Synthesis({ onNavigateToMaterial }: {
           {Object.entries(STATUS_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
         <span style={{ fontSize: 13, color: "#888" }}>{assets.length} 条</span>
+        <span style={{ marginLeft: "auto", fontSize: 13, color: assetSelCount ? "#2563eb" : "#888" }}>
+          实验选区：{assetSelCount} 条
+        </span>
+        {assetSelCount > 0 && <>
+          <button onClick={() => clearAssetSelection()} style={{ fontSize: 12 }}>清空</button>
+          <button onClick={onCreateExperiment}
+            style={{ padding: "4px 12px", border: "none", borderRadius: 4, background: "#7c3aed", color: "#fff", cursor: "pointer" }}>
+            创建内容实验
+          </button>
+        </>}
       </div>
       {/* 顶部「让 AI 从选中素材里提炼新一批」按钮 (spec §5.4) */}
       <div style={{ marginBottom: 16, padding: 12, background: "#f9f9f9", borderRadius: 6, display: "flex", alignItems: "center", gap: 12 }}>
@@ -143,6 +169,11 @@ export default function Synthesis({ onNavigateToMaterial }: {
       {assets.length === 0 && <p style={{ color: "#999" }}>暂无合成物。先到素材库选素材，再点提炼。</p>}
       {assets.map(a => (
         <div key={a.id} style={{ padding: 12, marginBottom: 8, borderBottom: "1px solid #eee" }}>
+          <label style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6, fontSize: 12, color: "#7c3aed" }}>
+            <input type="checkbox" checked={getSelectedAssetIds().includes(a.id)}
+              onChange={() => toggleAssetSelection(a.id)} />
+            加入内容实验
+          </label>
           {editingId === a.id ? (
             <div style={{ marginBottom: 8 }}>
               <textarea value={editText} onChange={e => setEditText(e.target.value)} rows={3}

@@ -48,6 +48,40 @@ export interface AssetView {
   status: string; quality: number | null; reject_reason: string | null;
   cluster_id: number | null; target_audience: string | null;
 }
+
+export interface ExperimentAssetLink {
+  id: number; asset_id: number | null; role: string;
+  position: number; text_snapshot: string;
+}
+export interface ExperimentMetricSnapshot {
+  id: number; measured_at: string;
+  views: number; likes: number; collects: number; comments: number; shares: number;
+  inquiries: number; qualified_leads: number; wechat_adds: number;
+  quotes: number; orders: number; revenue_cents: number; notes: string | null;
+}
+export interface ContentExperiment {
+  id: number; platform: string; status: 'draft' | 'published' | 'archived';
+  final_title: string; final_body: string;
+  published_url: string | null; published_at: string | null;
+  cluster_id: number | null; target_audience: string | null; notes: string | null;
+  created_at: string | null; updated_at: string | null;
+  assets: ExperimentAssetLink[];
+  metrics?: ExperimentMetricSnapshot[];
+  latest_metrics?: ExperimentMetricSnapshot | null;
+}
+export interface ExperimentAnalytics {
+  published_count: number; measured_count: number;
+  views: number; likes: number; collects: number; comments: number; shares: number;
+  inquiries: number; qualified_leads: number; wechat_adds: number;
+  quotes: number; orders: number; revenue_cents: number; engagements: number;
+  engagement_rate: number; inquiry_rate: number; wechat_rate: number; order_rate: number;
+  ranking: Array<{
+    experiment_id: number; title: string; cluster_id: number | null;
+    measured_at: string; views: number; inquiries: number; wechat_adds: number;
+    orders: number; revenue_cents: number; engagement_rate: number;
+    inquiry_rate: number; order_rate: number;
+  }>;
+}
 export interface CoverageItem {
   cluster_id: number; cluster_name: string;
   question_count: number; asset_count: number; covered: boolean;
