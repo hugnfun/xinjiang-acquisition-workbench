@@ -159,3 +159,32 @@ def test_list_filters_and_paginates(tmp_path, monkeypatch):
     drafts = client.get("/experiments?status=draft&limit=1").json()
     assert drafts["total"] == 1
     assert len(drafts["items"]) == 1
+
+
+def test_content_experiment_end_to_end(tmp_path, monkeypatch):
+    """临时库验收：选片段→建草稿→发布→两次快照→分析。"""
+    client, asset_ids = _setup(tmp_path, monkeypatch)
+    experiment = _create(client, asset_ids)
+    published = _publish(
+        client, experiment["id"], "https://xhs.example/note/e2e"
+    )
+    assert published["status"] == "published"
+    endpoint = f"/experiments/{experiment['id']}/metrics"
+    first = client.post(endpoint, json={
+        "measured_at": "2026-07-29T10:00:00",
+        "views": 100, "inquiries": 2, "wechat_adds": 1,
+    })
+    second = client.post(endpoint, json={
+        "measured_at": "2026-07-31T10:00:00",
+        "views": 300, "likes": 20, "collects": 10,
+        "inquiries": 8, "wechat_adds": 5, "orders": 2,
+        "revenue_cents": 600000,
+    })
+    assert first.status_code == second.status_code == 200
+    detail = client.get(f"/experiments/{experiment['id']}").json()
+    assert len(detail["metrics"]) == 2
+    analytics = client.get("/experiments/analytics").json()
+    assert analytics["views"] == 300
+    assert analytics["inquiries"] == 8
+    assert analytics["orders"] == 2
+    assert analytics["revenue_cents"] == 600000

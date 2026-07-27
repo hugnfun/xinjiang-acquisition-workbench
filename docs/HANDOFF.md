@@ -1,35 +1,49 @@
-# 交接文档 — 模块 A v0.3 收尾（问题池+合成库提质 + 抓取/增量）
+# 交接文档 — Sprint 3 已收尾
 
-> 写于 2026-07-02（v0.3 进行中）。v0.2 已合并 main。本会话在 `feat/module-A-v0.3` 上推进 A 的 v0.3 收尾清单。
-> 读此文件 + `.superpowers/sdd/progress.md` + `docs/superpowers/specs/2026-07-02-module-A-v0.2-design.md`（v0.2）即可接上。模块全景见 `docs/superpowers/specs/2026-06-28-workbench-module-A-design.md` §9（A~F 六大模块，目前只做了 A）。
+> 更新于 2026-07-28。当前分支 `main`，远端 `origin/main`。
 
-## 项目
-- `/Users/aicer/Documents/Project/xinjiang-acquisition-workbench`
-- 当前分支：`feat/module-A-v0.3`（基于 main=b006a03）。main 已含 v0.2。
-- Tauri+React+Python sidecar 桌面工具，新疆旅游获客工作台。
-- **无 remote**，纯本地。
+## 当前状态
 
-## v0.3 收尾清单进度
-- ✅ **B1 合成库 prompt 提质**：synthesize_prompt 补 few-shot 正/反例 + 反套话约束；实测产出从"五感治愈"套话→"iPhone16Pro 逆光-0.7曝光"等具体文案。顺手硬化 `_parse_obj`（推理模型 MiniMax-M3 思考带花括号致贪婪正则误并→返回{}的间歇失败）：去 markdown 围栏 + 扫顶层平衡 `{...}` 取最长。修了 test_task_config_defaults 的 .env 污染隔离 bug。commit `51a02f2`。
-- ✅ **B2 问题池阈值**：在 313 条 embedding 上扫阈值，**结论是 0.78 不动**——降阈值触发链式合并（0.72 时 193/313 挤一簇）且单问题簇占比不降。config 加注释 + 测试锁住传递闭包行为。commit `eb4f409`。
-- ✅ **C1 长 job 改独立短 session**：`db/session.py` 加 `session_scope()`；question_pool/label/synthesis 三 job 重构，LLM 调用期间不持有 session，根治 /jobs 偶发卡死。`_log` 改独立短 session 立即 commit → 日志即时可见（修了 Stage1 期间 DB 看不到进度的监控盲区）。commit `c6cdfac`。
-- ✅ **C2 前端 MINOR 债**：Synthesis extract 加 catch + setTimeout 清理 + useEffect race-guard；Questions race-guard + rename 清空输入 + source_ref null 守卫。commit `5514abf`。
-- ✅ **A1 抓取任务表单 UI + job**（spec §8 v0.3 项）：`sidecar/importers/note_importer.py` 抽 `insert_note` 复用；`sidecar/jobs/scrape.py` search→download→入库（短 session、逐条防御）；`POST /jobs/scrape` + Jobs.tsx 表单。commit `479a8bc`。
-- ✅ **A2 Flow C 增量聚类 + 周报**（spec §8 v0.3 项）：`run_question_pool_incremental`（质心分配新问题到现有簇/建新簇，只命名新簇）+ `POST /jobs/question-pool {mode: incremental}`；`sidecar/jobs/report.py` MiniMax 周报 + `POST /jobs/report`；Jobs.tsx 两按钮。commit `783eea9`。
-- 测试：82/82 绿（`.venv/bin/python -m pytest -v`，**必须 `arch -arm64` 前缀**，见下）。tsc 干净。
-- **v0.3 收尾清单全部完成**，feat/module-A-v0.3 可合并 main（用户决定时机）。
+新疆定制游获客工作台采用 Tauri + React + TypeScript 前端和 Python/FastAPI sidecar，数据存储在本地 SQLite。模块 A 及 Sprint 3 内容实验闭环已经完成。
 
-## 关键架构点（踩坑必读）
-- **Claude Code 的 Bash 跑在 Rosetta x86_64**，但项目 `.venv` 的包是 arm64-only（`pydantic_core` 等编译扩展）。直接 `.venv/bin/python` 会 ImportError。**解法：`arch -arm64 .venv/bin/python ...`**（系统 python3.13 是 universal2，arch -arm64 强制 arm64 slice，包正常加载）。已存记忆 `run-arm64-venv-via-arch`。**装** pip 原生二进制仍须用户自己在 arm64 终端跑（`!` 前缀），Claude 代装会污染。
-- 跑 sidecar：`arch -arm64 .venv/bin/python -m sidecar.app --port <port>`（NO_PROXY 给 ollama 绕代理在 app.py import 时设）。
-- 跑 Tauri：`arch -arm64 npm run tauri dev`（压整棵树 arm64，否则 Tauri spawn 的 sidecar 是 x64 → pydantic 崩）。target/ 已有 arm64 产物，cargo 增量快。
-- **本地有 Clash 代理 127.0.0.1:7890**：外网(DeepSeek/MiniMax)走代理，localhost(ollama) 必须 NO_PROXY 绕过（app.py 已设）。
-- 机器：Apple M5 Pro arm64。
+当前真实数据：
 
-## MiniMax 实测时序（校准过，别再用 HANDOFF 旧版 0.8s/条）
-- 冷启动单次调用 ~9s/条（冷启动开销主导，别拿单次外推）。
-- 全量冷启动 job 实测 **~27 分钟**（644 评论→313 问题→171 簇），不是 2-3h。Stage1~8min, Stage2~8min, Stage3-4 即时, Stage5~11min。
-- `.env`：`MINIMAX_API_KEY`(125 chars) / `MINIMAX_API_BASE=https://api.minimaxi.com/v1` / `MINIMAX_MODEL=MiniMax-M3` 已配好。
+- 素材 77 条，评论 6,542 条。
+- 问题 2,181 条，问题簇 386 个。
+- 合成内容片段 30 条。
+- 内容实验 0 条，等待真实发布使用。
+- Work Vault 47 条空作者已补全 42 条；剩余 5 条源文件没有作者标记。
 
-## 怎么继续（新会话第一句话）
-> 项目在 /Users/aicer/Documents/Project/xinjiang-acquisition-workbench，读 docs/HANDOFF.md。v0.3 收尾已完成（feat/module-A-v0.3，待合并 main）；下一步是真实使用产品攒数据解锁模块 B（≥80 条带标素材 + 发 30 篇内容收私信），或继续打磨 A（如合成库升级成完整笔记草稿、问题池单问题簇 LLM 语义合并）。
+## Sprint 3 交付
+
+- `0005_experiments`：内容实验、片段快照、指标快照及 Asset 来源任务迁移。
+- 内容实验支持草稿、发布、归档；发布记录组合多个 Asset 并保留不可变文案快照。
+- 手工记录浏览、互动、咨询、有效线索、加微信、报价、成交和成交金额，历史快照用于观察增长。
+- 分析面板使用每个实验最新快照计算互动率、咨询率、加微率和成交率，避免历史快照重复累加。
+- `task_client` 捕获真实 usage，任务失败或取消仍保留已产生用量；合成任务用量精确分摊到 Asset。
+- Work Vault 提供作者修复 dry-run 与执行入口，未来导入会自动提取置顶作者。
+
+关键提交：
+
+- `ef804cf` 内容实验与效果指标后端。
+- `5363a6e` 内容实验创建、指标与分析界面。
+- `d97c023` LLM token/cost 追踪。
+- `20fe41d` Work Vault 作者安全回填。
+
+## 验证结果
+
+- `arch -arm64 .venv/bin/python -m pytest -q`：161 passed。
+- `npm run build`：通过，38 modules transformed。
+- 临时数据库端到端：选择片段 → 创建草稿 → 发布 → 两次指标快照 → 分析汇总，通过。
+- 浏览器可视化检查：合成库片段选择、实验创建表单和 KPI 面板正常。
+
+## 运行注意
+
+- Apple Silicon 必须使用 `arch -arm64` 启动 Python sidecar 和 Tauri，避免 Rosetta 与原生 Python 包架构冲突。
+- 本地 Ollama 通过 `NO_PROXY` 绕过 Clash；外部 MiniMax/DeepSeek 仍按系统代理访问。
+- MiniMax-M3 的计价未硬编码。若 `.env` 没有 `TASK_INPUT_PRICE_CNY_PER_1M` 和 `TASK_OUTPUT_PRICE_CNY_PER_1M`，只展示真实 token，成本显示未配置。
+- 作者回填前备份位于 `data/data.db.pre-author-backfill.bak`。
+
+## 下一步
+
+进入真实运营验证：从合成库挑选片段创建实验，发布后在 1/3/7 天录入累计指标。积累足够实验后，再依据问题簇、客群和文案类型比较咨询率与成交率。
