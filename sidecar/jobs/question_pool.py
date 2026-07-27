@@ -7,6 +7,7 @@ from sidecar.llm import task_client as tc
 from sidecar.llm import embedding as emb
 from sidecar.cluster.cosine import cluster_by_similarity
 from sidecar.jobs.queue import cancellation_checkpoint
+from sidecar.jobs.usage import job_usage_accumulator
 from sidecar import config
 
 BATCH = 50
@@ -117,6 +118,12 @@ def _filter_candidates(job_id: int, comment_data):
 
 
 def run_question_pool_job(job_id: int):
+    usage = job_usage_accumulator(job_id)
+    with tc.track_usage(usage):
+        return _run_question_pool_job(job_id)
+
+
+def _run_question_pool_job(job_id: int):
     _set_job(job_id, status="running", started_at=datetime.utcnow())
     _log(job_id, "开始问题池冷启动")
     try:
@@ -260,6 +267,12 @@ def _cosine(a: np.ndarray, b: np.ndarray) -> float:
 
 
 def run_question_pool_incremental(job_id: int):
+    usage = job_usage_accumulator(job_id)
+    with tc.track_usage(usage):
+        return _run_question_pool_incremental(job_id)
+
+
+def _run_question_pool_incremental(job_id: int):
     """增量更新问题池：只处理新评论，按质心分配到现有簇（sim>阈值）或建新簇。
 
     与全量冷启动的区别：不重跑已有问题、不重聚类、只命名新建簇。质心=簇内问题

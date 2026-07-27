@@ -7,6 +7,7 @@ interface JobDetail {
   id: number; type: string; status: string;
   params: any; result_summary: any; error: string | null;
   progress: number; progress_total: number;
+  token_usage: JobView["token_usage"];
   logs: JobLogEntry[];
 }
 
@@ -273,6 +274,7 @@ export default function Jobs() {
                       <div style={{ fontSize: 13 }}>
                         {detail[j.id].error && <div style={{ color: "#b00020", marginBottom: 4 }}>错误：{detail[j.id].error}</div>}
                         <div>摘要：{JSON.stringify(detail[j.id].result_summary)}</div>
+                        <UsageLine usage={detail[j.id].token_usage} />
                         <div style={{ marginTop: 4 }}>参数：{JSON.stringify(detail[j.id].params)}</div>
                         <div style={{ marginTop: 4 }}>日志：</div>
                         {detail[j.id].logs.length === 0 && <div style={{ color: "#999" }}>（无日志）</div>}
@@ -290,6 +292,20 @@ export default function Jobs() {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function UsageLine({ usage }: { usage: JobView["token_usage"] }) {
+  if (!usage || (!usage.available && !usage.calls)) {
+    return <div style={{ marginTop: 4, color: "#999" }}>Token：供应商未返回用量</div>;
+  }
+  const cost = usage.cost_cny == null ? "成本未配置" : `¥${usage.cost_cny.toFixed(6)}`;
+  return (
+    <div style={{ marginTop: 4, color: "#555" }}>
+      Token：{usage.prompt_tokens || 0} 输入 + {usage.completion_tokens || 0} 输出
+      {" = "}{usage.total_tokens || 0} · {cost}
+      {usage.unavailable_calls ? ` · ${usage.unavailable_calls} 次无 usage` : ""}
     </div>
   );
 }

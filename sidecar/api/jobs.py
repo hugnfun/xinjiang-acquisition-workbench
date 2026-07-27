@@ -26,6 +26,7 @@ def list_jobs(limit: int = 50, s: Session = Depends(get_db)):
         "error": j.error,
         "progress": j.progress, "progress_total": j.progress_total,
         "cancel_requested": j.cancel_requested,
+        "token_usage": j.token_usage if hasattr(j, "token_usage") else {},
     } for j in jobs]
 
 

@@ -35,7 +35,9 @@ def list_assets(
     return [{"id": a.id, "type": a.type, "text": a.text,
              "derived_from": a.derived_from, "tags": a.tags, "disliked": a.disliked,
              "status": a.status, "quality": a.quality, "reject_reason": a.reject_reason,
-             "cluster_id": a.cluster_id, "target_audience": a.target_audience}
+             "cluster_id": a.cluster_id, "target_audience": a.target_audience,
+             "source_job_id": a.source_job_id, "model_name": a.model_name,
+             "prompt_version": a.prompt_version, "token_usage": a.token_usage}
             for a in q.order_by(Asset.created_at.desc()).all()]
 
 class AssetUpdateIn(BaseModel):

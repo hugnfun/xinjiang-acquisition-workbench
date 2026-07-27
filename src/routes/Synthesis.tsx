@@ -196,6 +196,14 @@ function SynthesisContent({ onNavigateToMaterial, onCreateExperiment }: {
               {Object.entries(STATUS_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
             </select>
           </div>
+          {(a.model_name || a.source_job_id) && (
+            <div style={{ fontSize: 11, color: "#999", marginBottom: 4 }}>
+              {a.model_name || "未知模型"} · {a.prompt_version || "未知 prompt"}
+              {a.source_job_id ? ` · 任务 #${a.source_job_id}` : ""}
+              {a.token_usage?.available ? ` · ${a.token_usage.total_tokens || 0} tokens` : ""}
+              {a.token_usage?.cost_cny != null ? ` · ¥${a.token_usage.cost_cny.toFixed(6)}` : ""}
+            </div>
+          )}
           {/* 问题簇关联 */}
           <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 4 }}>
             <span style={{ fontSize: 12, color: "#888" }}>关联问题簇:</span>

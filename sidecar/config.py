@@ -37,7 +37,15 @@ if _minimax_key:
 else:
     TASK_MODEL = os.environ.get("TASK_MODEL", "qwen3.6:27b-q4_K_M")
     TASK_API_BASE = os.environ.get("TASK_API_BASE", "http://localhost:11434/v1")
-    TASK_API_KEY = os.environ.get("TASK_API_KEY", "ollama")
+TASK_API_KEY = os.environ.get("TASK_API_KEY", "ollama")
+
+# 云端文本任务计价（元 / 百万 token）。不提供时只记录 token，不伪造成本。
+def _optional_float(name: str) -> float | None:
+    raw = os.environ.get(name, "").strip()
+    return float(raw) if raw else None
+
+TASK_INPUT_PRICE_CNY_PER_1M = _optional_float("TASK_INPUT_PRICE_CNY_PER_1M")
+TASK_OUTPUT_PRICE_CNY_PER_1M = _optional_float("TASK_OUTPUT_PRICE_CNY_PER_1M")
 
 # ── embedding（本地 qwen3-embedding，免费）──
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "qwen3-embedding:latest")

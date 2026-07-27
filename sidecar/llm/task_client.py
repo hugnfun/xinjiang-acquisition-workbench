@@ -1,8 +1,102 @@
 import json
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
+from urllib.parse import urlparse
 from openai import OpenAI
 from sidecar import config
 from sidecar.llm.prompts import question as qp, synthesis as sp
+
+
+class UsageAccumulator:
+    """聚合 OpenAI-compatible 响应中的 token usage，并估算人民币成本。"""
+
+    def __init__(self, on_change=None):
+        self.prompt_tokens = 0
+        self.completion_tokens = 0
+        self.total_tokens = 0
+        self.calls = 0
+        self.usage_calls = 0
+        self.unavailable_calls = 0
+        self._on_change = on_change
+        host = (urlparse(config.TASK_API_BASE).hostname or "").lower()
+        self.is_local = host in {"localhost", "127.0.0.1", "::1"}
+        self.provider = "ollama" if self.is_local else host or "unknown"
+        self.model = config.TASK_MODEL
+        self.input_price = config.TASK_INPUT_PRICE_CNY_PER_1M
+        self.output_price = config.TASK_OUTPUT_PRICE_CNY_PER_1M
+
+    def add_usage(
+        self,
+        prompt_tokens: int,
+        completion_tokens: int,
+        total_tokens: int | None = None,
+    ) -> None:
+        prompt = max(0, int(prompt_tokens or 0))
+        completion = max(0, int(completion_tokens or 0))
+        total = max(0, int(total_tokens if total_tokens is not None else prompt + completion))
+        self.calls += 1
+        self.usage_calls += 1
+        self.prompt_tokens += prompt
+        self.completion_tokens += completion
+        self.total_tokens += total
+        self._notify()
+
+    def add_response(self, response) -> None:
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            self.calls += 1
+            self.unavailable_calls += 1
+            self._notify()
+            return
+        self.add_usage(
+            getattr(usage, "prompt_tokens", 0) or 0,
+            getattr(usage, "completion_tokens", 0) or 0,
+            getattr(usage, "total_tokens", None),
+        )
+
+    def to_dict(self) -> dict:
+        cost: float | None
+        if self.is_local:
+            cost = 0.0
+        elif self.input_price is not None and self.output_price is not None:
+            cost = round(
+                self.prompt_tokens * self.input_price / 1_000_000
+                + self.completion_tokens * self.output_price / 1_000_000,
+                8,
+            )
+        else:
+            cost = None
+        return {
+            "available": self.usage_calls > 0,
+            "calls": self.calls,
+            "usage_calls": self.usage_calls,
+            "unavailable_calls": self.unavailable_calls,
+            "prompt_tokens": self.prompt_tokens,
+            "completion_tokens": self.completion_tokens,
+            "total_tokens": self.total_tokens,
+            "cost_cny": cost,
+            "provider": self.provider,
+            "model": self.model,
+        }
+
+    def _notify(self) -> None:
+        if self._on_change:
+            self._on_change(self.to_dict())
+
+
+_active_usage: ContextVar[UsageAccumulator | None] = ContextVar(
+    "task_client_usage", default=None
+)
+
+
+@contextmanager
+def track_usage(accumulator: UsageAccumulator):
+    token = _active_usage.set(accumulator)
+    try:
+        yield accumulator
+    finally:
+        _active_usage.reset(token)
 
 def _parse_obj(text: str) -> dict:
     """解析模型输出为顶层 dict。
@@ -82,30 +176,43 @@ def _extract_toplevel_json(s: str) -> list[str]:
 def _get_client():
     return OpenAI(base_url=config.TASK_API_BASE, api_key=config.TASK_API_KEY, timeout=60, max_retries=1)
 
-def chat_json(system: str, user: str) -> str:
+def chat_json(
+    system: str, user: str, usage: UsageAccumulator | None = None
+) -> str:
     client = _get_client()
     resp = client.chat.completions.create(
         model=config.TASK_MODEL,
         messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
     )
+    accumulator = usage or _active_usage.get()
+    if accumulator:
+        accumulator.add_response(resp)
     return resp.choices[0].message.content or ""
 
-def filter_questions(comments: list[dict]) -> list[dict]:
+def filter_questions(
+    comments: list[dict], usage: UsageAccumulator | None = None
+) -> list[dict]:
     system, user = qp.filter_prompt(comments)
-    return _parse_obj(chat_json(system, user)).get("results", [])
+    return _parse_obj(chat_json(system, user, usage)).get("results", [])
 
-def normalize_questions(questions: list[dict]) -> list[dict]:
+def normalize_questions(
+    questions: list[dict], usage: UsageAccumulator | None = None
+) -> list[dict]:
     system, user = qp.normalize_prompt(questions)
-    return _parse_obj(chat_json(system, user)).get("results", [])
+    return _parse_obj(chat_json(system, user, usage)).get("results", [])
 
-def name_cluster(samples: list[str]) -> dict:
+def name_cluster(
+    samples: list[str], usage: UsageAccumulator | None = None
+) -> dict:
     system, user = qp.name_prompt(samples)
-    out = _parse_obj(chat_json(system, user))
+    out = _parse_obj(chat_json(system, user, usage))
     return {"name": out.get("name", ""), "description": out.get("description", "")}
 
-def synthesize(materials: list[dict], types: list[str]) -> dict:
+def synthesize(
+    materials: list[dict], types: list[str], usage: UsageAccumulator | None = None
+) -> dict:
     system, user = sp.synthesize_prompt(materials, types)
-    out = _parse_obj(chat_json(system, user))
+    out = _parse_obj(chat_json(system, user, usage))
     return {
         "selling_points": out.get("selling_points", []),
         "hooks": out.get("hooks", []),

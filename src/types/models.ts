@@ -30,6 +30,13 @@ export interface JobView {
   finished_at: string | null; error: string | null;
   progress: number; progress_total: number;
   cancel_requested: boolean;
+  token_usage: TokenUsage;
+}
+export interface TokenUsage {
+  available?: boolean; calls?: number; usage_calls?: number; unavailable_calls?: number;
+  prompt_tokens?: number; completion_tokens?: number; total_tokens?: number;
+  cost_cny?: number | null; provider?: string; model?: string;
+  allocation_method?: string;
 }
 export interface ClusterView {
   id: number; name: string; description: string; question_count: number;
@@ -47,6 +54,8 @@ export interface AssetView {
   derived_from: number[]; tags: string[]; disliked: boolean;
   status: string; quality: number | null; reject_reason: string | null;
   cluster_id: number | null; target_audience: string | null;
+  source_job_id: number | null; model_name: string | null;
+  prompt_version: string | null; token_usage: TokenUsage;
 }
 
 export interface ExperimentAssetLink {

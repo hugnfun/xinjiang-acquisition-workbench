@@ -101,6 +101,22 @@ def test_synthesis_empty_result_is_error(tmp_path, monkeypatch):
         sy.run_synthesis([mid], ["title"])
 
 
+def test_allocate_usage_preserves_totals_and_cost():
+    rows = sy._allocate_usage({
+        "available": True,
+        "prompt_tokens": 10,
+        "completion_tokens": 5,
+        "total_tokens": 15,
+        "cost_cny": 0.00017,
+        "provider": "api.minimaxi.com",
+        "model": "MiniMax-M3",
+    }, 3)
+    assert sum(r["prompt_tokens"] for r in rows) == 10
+    assert sum(r["completion_tokens"] for r in rows) == 5
+    assert sum(r["total_tokens"] for r in rows) == 15
+    assert round(sum(r["cost_cny"] for r in rows), 8) == 0.00017
+
+
 def test_synthesize_prompt_has_fewshot_and_anticliche():
     """B1: prompt 必须带 few-shot 正反例 + 反套话约束，否则 MiniMax 必出套话。"""
     from sidecar.llm.prompts.synthesis import synthesize_prompt

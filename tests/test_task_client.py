@@ -1,12 +1,13 @@
 from sidecar.llm import task_client as TC
 
-def _fake_chat(text):
+def _fake_chat(text, usage=None):
     class Resp:
         class Choice:
             class Msg:
                 content = text
             message = Msg()
         choices = [Choice()]
+    Resp.usage = usage
     class Client:
         @property
         def chat(self): return self
@@ -18,6 +19,40 @@ def _fake_chat(text):
 def test_chat_json_returns_content(monkeypatch):
     monkeypatch.setattr(TC, "_get_client", lambda: _fake_chat("hello world"))
     assert TC.chat_json("sys", "usr") == "hello world"
+
+
+def test_chat_json_collects_usage_and_cost(monkeypatch):
+    class Usage:
+        prompt_tokens = 120
+        completion_tokens = 30
+        total_tokens = 150
+
+    monkeypatch.setattr(TC, "_get_client", lambda: _fake_chat("ok", Usage()))
+    monkeypatch.setattr(TC.config, "TASK_API_BASE", "https://api.minimaxi.com/v1")
+    monkeypatch.setattr(TC.config, "TASK_INPUT_PRICE_CNY_PER_1M", 2.0)
+    monkeypatch.setattr(TC.config, "TASK_OUTPUT_PRICE_CNY_PER_1M", 8.0)
+    usage = TC.UsageAccumulator()
+    assert TC.chat_json("sys", "usr", usage) == "ok"
+    snapshot = usage.to_dict()
+    assert snapshot["available"] is True
+    assert snapshot["prompt_tokens"] == 120
+    assert snapshot["completion_tokens"] == 30
+    assert snapshot["total_tokens"] == 150
+    assert snapshot["cost_cny"] == 0.00048
+
+
+def test_usage_missing_is_not_reported_as_zero_cost(monkeypatch):
+    monkeypatch.setattr(TC, "_get_client", lambda: _fake_chat("ok"))
+    monkeypatch.setattr(TC.config, "TASK_API_BASE", "https://api.minimaxi.com/v1")
+    monkeypatch.setattr(TC.config, "TASK_INPUT_PRICE_CNY_PER_1M", None)
+    monkeypatch.setattr(TC.config, "TASK_OUTPUT_PRICE_CNY_PER_1M", None)
+    usage = TC.UsageAccumulator()
+    with TC.track_usage(usage):
+        assert TC.chat_json("sys", "usr") == "ok"
+    snapshot = usage.to_dict()
+    assert snapshot["available"] is False
+    assert snapshot["unavailable_calls"] == 1
+    assert snapshot["cost_cny"] is None
 
 def test_filter_questions_parses(monkeypatch):
     monkeypatch.setattr(TC, "_get_client", lambda: _fake_chat(

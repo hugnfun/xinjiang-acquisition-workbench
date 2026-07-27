@@ -8,6 +8,7 @@ from sidecar.db.session import session_scope
 from sidecar.db.models import ScrapeJob, JobLog, QuestionCluster, Question
 from sidecar.llm import task_client as tc
 from sidecar.jobs.queue import cancellation_checkpoint
+from sidecar.jobs.usage import job_usage_accumulator
 
 
 def _log(job_id, msg, level="info"):
@@ -23,6 +24,12 @@ def _set_job(job_id, **fields):
 
 
 def run_report_job(job_id: int):
+    usage = job_usage_accumulator(job_id)
+    with tc.track_usage(usage):
+        return _run_report_job(job_id)
+
+
+def _run_report_job(job_id: int):
     _set_job(job_id, status="running", started_at=datetime.utcnow())
     _log(job_id, "生成问题池周报")
     try:
