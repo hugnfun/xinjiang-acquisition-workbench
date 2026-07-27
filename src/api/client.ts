@@ -178,6 +178,10 @@ export const api = {
     post<import('../types/models').WorkVaultScanResult>('/work-vault/scan', { vault_dir }),
   importWorkVault: (vault_dir: string, filenames: string[]) =>
     post<{ job_id: number }>('/work-vault/import', { vault_dir, filenames }),
+  backfillWorkVaultAuthors: (vault_dir: string, dry_run: boolean) =>
+    post<import('../types/models').WorkVaultAuthorBackfillResult>(
+      '/work-vault/backfill-authors', { vault_dir, dry_run },
+    ),
 
   // Image URLs are synchronous (<img src>), so they can't await resolvePort.
   getImageUrl: (mid: number, path: string) => {

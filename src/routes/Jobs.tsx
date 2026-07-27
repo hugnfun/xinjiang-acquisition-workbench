@@ -33,6 +33,7 @@ export default function Jobs() {
   const [scanItems, setScanItems] = useState<WorkVaultScanItem[]>([]);
   const [scanSummary, setScanSummary] = useState<Record<string, number>>({});
   const [scanBusy, setScanBusy] = useState(false);
+  const [authorBackfill, setAuthorBackfill] = useState<import("../types/models").WorkVaultAuthorBackfillResult | null>(null);
 
   const refresh = () => api.getJobs().then(setJobs).catch(e => setErr(e?.message || String(e)));
   useEffect(() => { refresh(); const t = setInterval(refresh, 2000); return () => clearInterval(t); }, []);
@@ -84,6 +85,15 @@ export default function Jobs() {
     } catch (e: any) { setErr(e?.message || String(e)); }
     finally { setBusy(null); }
     setTimeout(refresh, 500);
+  };
+
+  const backfillAuthors = async (dryRun: boolean) => {
+    setScanBusy(true); setErr(null);
+    try {
+      const result = await api.backfillWorkVaultAuthors(vaultDir.trim(), dryRun);
+      setAuthorBackfill(result);
+    } catch (e: any) { setErr(e?.message || String(e)); }
+    finally { setScanBusy(false); }
   };
 
   const retry = async (id: number) => {
@@ -167,7 +177,25 @@ export default function Jobs() {
             <button onClick={scanWorkVault} disabled={scanBusy || busy !== null || running} style={{ padding: "4px 16px", border: "1px solid #2563eb", borderRadius: 4, background: "#2563eb", color: "#fff", cursor: "pointer", opacity: scanBusy || busy !== null || running ? 0.6 : 1 }}>
               {scanBusy ? "扫描中…" : "扫描（dry-run）"}
             </button>
+            <button onClick={() => backfillAuthors(true)} disabled={scanBusy || busy !== null || running}
+              style={{ padding: "4px 12px", border: "1px solid #7c3aed", borderRadius: 4, background: "#fff", color: "#7c3aed", cursor: "pointer" }}>
+              预览作者修复
+            </button>
           </div>
+          {authorBackfill && (
+            <div style={{ marginBottom: 8, padding: 8, background: "#faf5ff", borderRadius: 4, fontSize: 13 }}>
+              空作者 {authorBackfill.total_blank} · 可修复 {authorBackfill.repairable}
+              {" · "}无作者标记 {authorBackfill.no_author} · 缺文件 {authorBackfill.missing_file}
+              {!authorBackfill.dry_run && ` · 已更新 ${authorBackfill.updated}`}
+              {authorBackfill.dry_run && authorBackfill.repairable > 0 && (
+                <button onClick={() => {
+                  if (confirm(`确认回填 ${authorBackfill.repairable} 条空作者？已有作者不会被覆盖。`)) backfillAuthors(false);
+                }} style={{ marginLeft: 10, background: "#7c3aed", color: "#fff", border: "none", borderRadius: 3, padding: "3px 10px" }}>
+                  执行修复
+                </button>
+              )}
+            </div>
+          )}
           {scanItems.length > 0 && (
             <>
               <div style={{ display: "flex", gap: 12, marginBottom: 8, fontSize: 13 }}>

@@ -124,3 +124,12 @@ export interface WorkVaultScanResult {
   summary: Record<string, number>;
   items: WorkVaultScanItem[];
 }
+
+export interface WorkVaultAuthorBackfillResult {
+  dry_run: boolean; total_blank: number; repairable: number; updated: number;
+  no_author: number; missing_file: number;
+  items: Array<{
+    material_id: number; filename: string;
+    status: string; author: string;
+  }>;
+}

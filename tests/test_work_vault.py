@@ -5,6 +5,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sidecar.importers.work_vault import (
     parse_work_vault_note, scan_vault, insert_work_vault_note, ScanItem,
+    backfill_work_vault_authors, extract_material_author,
 )
 from sidecar.db.session import get_session
 from sidecar.db.models import Material, MaterialImage, Comment
@@ -55,6 +56,7 @@ def test_parse_comments():
     assert c2["author"] == "Banaballa"
     assert c2["likes"] == 1
     assert "8月中" in c2["text"]
+    assert extract_material_author(p.comments) == "新疆领队-多多"
 
 
 def test_parse_empty_file():
@@ -187,9 +189,42 @@ def test_insert_with_comments_and_images(tmp_path, monkeypatch):
     with session_scope() as s:
         assert insert_work_vault_note(s, str(vault), "note.md") is True
         m = s.query(Material).first()
+        assert m.author == "作者B"
         assert m.comments_count == 2
         assert s.query(Comment).count() == 2
         assert s.query(MaterialImage).count() == 1
         # 图片应被复制到 media 目录
         img_dst = tmp_path / "media" / m.note_id / "Pasted image 20260720161421.png"
         assert img_dst.exists()
+
+
+def test_backfill_authors_dry_run_and_execute(tmp_path, monkeypatch):
+    monkeypatch.setattr("sidecar.config.DB_PATH", tmp_path / "t.db")
+    monkeypatch.setattr("sidecar.config.MEDIA_DIR", tmp_path / "media")
+    from sidecar.db.session import init_db, session_scope
+    init_db()
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    filename = "note.md"
+    (vault / filename).write_text(
+        "正文\n共 1 条评论\n\n领队多多\n作者\n置顶评论\n欢迎咨询\n"
+        "2025-05-02新疆\n赞\n回复\n",
+        encoding="utf-8",
+    )
+    with session_scope() as s:
+        s.add(Material(
+            note_id="blank-author", url="", title="note", author="",
+            content="正文", platform="xiaohongshu",
+            local_folder=f"workvault:{filename}",
+        ))
+    with session_scope() as s:
+        preview = backfill_work_vault_authors(s, str(vault), dry_run=True)
+        assert preview["repairable"] == 1
+        assert preview["updated"] == 0
+    with session_scope() as s:
+        assert s.query(Material).filter_by(note_id="blank-author").one().author == ""
+    with session_scope() as s:
+        result = backfill_work_vault_authors(s, str(vault), dry_run=False)
+        assert result["updated"] == 1
+    with session_scope() as s:
+        assert s.query(Material).filter_by(note_id="blank-author").one().author == "领队多多"

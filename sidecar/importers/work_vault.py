@@ -370,6 +370,78 @@ def scan_vault(vault_dir, existing_hashes=None):
 
 # ── 入库 ──
 
+def extract_material_author(comments: list[dict]) -> str:
+    """从评论区提取笔记作者：优先置顶作者评论，再降级为任意作者评论。"""
+    for comment in comments:
+        if comment.get("is_author") and comment.get("is_pinned"):
+            return (comment.get("author") or "").strip()
+    for comment in comments:
+        if comment.get("is_author"):
+            return (comment.get("author") or "").strip()
+    return ""
+
+
+def backfill_work_vault_authors(s, vault_dir: str, dry_run: bool = True) -> dict:
+    """重读 Work Vault 原文件，只为 author 为空的素材补作者。"""
+    vault = Path(vault_dir)
+    if not vault.is_dir():
+        raise FileNotFoundError(f"目录不存在: {vault_dir}")
+    materials = s.query(Material).filter(
+        Material.local_folder.like("workvault:%"),
+        Material.author == "",
+    ).order_by(Material.id).all()
+    result = {
+        "dry_run": dry_run,
+        "total_blank": len(materials),
+        "repairable": 0,
+        "updated": 0,
+        "no_author": 0,
+        "missing_file": 0,
+        "items": [],
+    }
+    vault_root = vault.resolve()
+    for material in materials:
+        filename = (material.local_folder or "")[len("workvault:"):]
+        source = (vault / filename).resolve()
+        try:
+            source.relative_to(vault_root)
+        except ValueError:
+            result["missing_file"] += 1
+            result["items"].append({
+                "material_id": material.id, "filename": filename,
+                "status": "invalid_path", "author": "",
+            })
+            continue
+        if not source.is_file():
+            result["missing_file"] += 1
+            result["items"].append({
+                "material_id": material.id, "filename": filename,
+                "status": "missing_file", "author": "",
+            })
+            continue
+        parsed = parse_work_vault_note(
+            source.read_text(encoding="utf-8"), filename
+        )
+        author = extract_material_author(parsed.comments)
+        if not author:
+            result["no_author"] += 1
+            result["items"].append({
+                "material_id": material.id, "filename": filename,
+                "status": "no_author", "author": "",
+            })
+            continue
+        result["repairable"] += 1
+        if not dry_run:
+            material.author = author
+            result["updated"] += 1
+        result["items"].append({
+            "material_id": material.id, "filename": filename,
+            "status": "repairable" if dry_run else "updated",
+            "author": author,
+        })
+    return result
+
+
 def insert_work_vault_note(s, vault_dir, filename):
     """把单篇 Work Vault 笔记写入 DB。
 
@@ -397,7 +469,7 @@ def insert_work_vault_note(s, vault_dir, filename):
         note_id=note_id,
         url="",
         title=parsed.title,
-        author="",
+        author=extract_material_author(parsed.comments),
         author_url="",
         content=parsed.content,
         likes=0,

@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from sidecar.db.session import get_db
 from sidecar.db.models import Material, ScrapeJob
-from sidecar.importers.work_vault import scan_vault
+from sidecar.importers.work_vault import scan_vault, backfill_work_vault_authors
 from sidecar.jobs.queue import submit
 from sidecar.jobs.work_vault import run_work_vault_import
 
@@ -21,6 +21,11 @@ class ScanIn(BaseModel):
 class ImportIn(BaseModel):
     vault_dir: str = DEFAULT_VAULT_DIR
     filenames: list[str]
+
+
+class BackfillAuthorsIn(BaseModel):
+    vault_dir: str = DEFAULT_VAULT_DIR
+    dry_run: bool = True
 
 
 @router.post("/work-vault/scan")
@@ -65,6 +70,22 @@ def import_notes(body: ImportIn, s: Session = Depends(get_db)):
     s.refresh(job)
     submit(job.id, run_work_vault_import, job.id, body.vault_dir, body.filenames)
     return {"job_id": job.id}
+
+
+@router.post("/work-vault/backfill-authors")
+def backfill_authors(
+    body: BackfillAuthorsIn, s: Session = Depends(get_db)
+):
+    """预览或执行 Work Vault 空作者回填，不覆盖已有作者。"""
+    try:
+        result = backfill_work_vault_authors(
+            s, body.vault_dir, dry_run=body.dry_run
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(400, str(e))
+    if not body.dry_run:
+        s.commit()
+    return result
 
 
 def _summarize(items) -> dict:
