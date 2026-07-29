@@ -29,8 +29,25 @@ async function baseUrl(): Promise<string> {
   return `http://127.0.0.1:${await resolvePort()}`;
 }
 
+// The Tauri window can render a little earlier than the Python sidecar starts
+// listening. Retry only idempotent reads during that short cold-start window;
+// writes are deliberately not retried to avoid duplicate mutations.
+async function fetchGetWithStartupRetry(url: string): Promise<Response> {
+  const delays = [0, 150, 250, 400, 600, 900];
+  let lastError: unknown;
+  for (const delay of delays) {
+    if (delay) await new Promise(resolve => window.setTimeout(resolve, delay));
+    try {
+      return await fetch(url);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
+
 async function get<T>(path: string): Promise<T> {
-  const r = await fetch(`${await baseUrl()}${path}`);
+  const r = await fetchGetWithStartupRetry(`${await baseUrl()}${path}`);
   if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
   return r.json();
 }
