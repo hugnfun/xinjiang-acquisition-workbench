@@ -11,7 +11,10 @@ from sidecar.jobs.work_vault import run_work_vault_import
 
 router = APIRouter()
 
-DEFAULT_VAULT_DIR = "/Users/aicer/Documents/Work Vault"
+DEFAULT_VAULT_DIR = (
+    "/Users/aicer/Documents/Project/"
+    "xinjiang-acquisition-workbench/data/work-vault"
+)
 
 
 class ScanIn(BaseModel):

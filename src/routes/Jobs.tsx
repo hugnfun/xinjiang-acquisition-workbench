@@ -29,7 +29,7 @@ export default function Jobs() {
   const [scrapeLimit, setScrapeLimit] = useState(20);
 
   // Work Vault import state
-  const [vaultDir, setVaultDir] = useState("/Users/aicer/Documents/Work Vault");
+  const [vaultDir, setVaultDir] = useState("/Users/aicer/Documents/Project/xinjiang-acquisition-workbench/data/work-vault");
   const [scanItems, setScanItems] = useState<WorkVaultScanItem[]>([]);
   const [scanSummary, setScanSummary] = useState<Record<string, number>>({});
   const [scanBusy, setScanBusy] = useState(false);
@@ -173,7 +173,7 @@ export default function Jobs() {
       {tab === "vault" && (
         <div style={{ marginBottom: 16, padding: 12, background: "#f6f8fa", borderRadius: 6 }}>
           <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
-            <input value={vaultDir} onChange={e => setVaultDir(e.target.value)} placeholder="/Users/aicer/Documents/Work Vault" style={{ padding: "4px 8px", border: "1px solid #ccc", borderRadius: 4, width: 340 }} />
+            <input value={vaultDir} onChange={e => setVaultDir(e.target.value)} placeholder="/Users/aicer/Documents/Project/xinjiang-acquisition-workbench/data/work-vault" style={{ padding: "4px 8px", border: "1px solid #ccc", borderRadius: 4, width: 340 }} />
             <button onClick={scanWorkVault} disabled={scanBusy || busy !== null || running} style={{ padding: "4px 16px", border: "1px solid #2563eb", borderRadius: 4, background: "#2563eb", color: "#fff", cursor: "pointer", opacity: scanBusy || busy !== null || running ? 0.6 : 1 }}>
               {scanBusy ? "扫描中…" : "扫描（dry-run）"}
             </button>
